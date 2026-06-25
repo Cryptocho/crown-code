@@ -85,13 +85,13 @@
 ### 3.2 clineignore 规则
 - **C 对应**：`tools.c` 中 `IgnoreRules`, `load_ignore_file()`, `init_ignore_rules()`, `check_ignore_path()`, `match_ignore_pattern()`
 - **依赖**：3.1 路径解析
-- [ ] 创建 `src/ignore_rules.nim`
-- [ ] 加载全局 `~/.cline/data/.clineignore`
-- [ ] 加载项目级 `.clineignore`
-- [ ] fnmatch 匹配逻辑
-- [ ] `checkIgnorePath(path: string): bool`
-- [ ] 创建 `tests/test_ignore_rules.nim`
-- [ ] 更新 `tests/test_runner.nim`
+- [x] 创建 `src/ignore_rules.nim`
+- [x] 加载全局 `~/.cline/data/.clineignore`
+- [x] 加载项目级 `.clineignore`
+- [x] fnmatch 匹配逻辑（`fnmatchPathname` 支持 `FNM_PATHNAME` 语义）
+- [x] `checkIgnorePath(path: string): bool`
+- [x] 创建 `tests/test_ignore_rules.nim`
+- [x] 更新 `tests/test_runner.nim`
 
 ### 3.3 文件读取
 - **C 对应**：`tools.c` 中 `file_read()`, `read_file_content()`, `count_lines()`, `format_content_with_line_numbers()`, `parse_line_range()`, `FileReadCacheEntry`

@@ -86,6 +86,48 @@ suite "matchGlob - edge cases":
     check not matchGlob("", "?")
     check matchGlob("a", "!")
 
+suite "fnmatchPathname - pathname semantics":
+  test "star does not match path separator":
+    check not matchGlobPathname("dir/file.nim", "*.nim")
+    check matchGlobPathname("file.nim", "*.nim")
+
+  test "*/ prefix trick matches single-level subdir (not deep)":
+    check matchGlobPathname("dir/file.nim", "*/file.nim")
+    check not matchGlobPathname("deep/dir/file.nim", "*/file.nim")
+    check not matchGlobPathname("dir/other.nim", "*/file.nim")
+
+  test "question mark does not match path separator":
+    check not matchGlobPathname("/a.txt", "?.txt")
+    check matchGlobPathname("a.txt", "?.txt")
+
+  test "star matches within path segment":
+    check matchGlobPathname("a/b/c.nim", "a/*/c.nim")
+    check not matchGlobPathname("a/b/d/c.nim", "a/*/c.nim")
+
+  test "character class does not match slash":
+    check not matchGlobPathname("/a.nim", "[abc].nim")
+    check matchGlobPathname("a.nim", "[abc].nim")
+
+  test "negation with pathname":
+    check matchGlobPathname("file.nim", "!*.txt")
+    check not matchGlobPathname("file.nim", "!*.nim")
+
+  test "exact path match":
+    check matchGlobPathname("dir/sub/file.nim", "dir/sub/file.nim")
+    check not matchGlobPathname("dir/sub/file.nim", "dir/other.nim")
+
+  test "trailing star in pathname":
+    check matchGlobPathname("dir/file", "dir/*")
+    check not matchGlobPathname("dir/sub/file", "dir/*")
+
+  test "empty pattern returns false":
+    check not matchGlobPathname("anything", "")
+    check not matchGlobPathname("", "")
+
+  test "star matches empty string (without slash)":
+    check matchGlobPathname("", "*")
+    check not matchGlobPathname("/", "*")
+
 suite "matchAnyGlob - multi pattern":
   test "single positive pattern":
     check matchAnyGlob("hello", ["hello"])

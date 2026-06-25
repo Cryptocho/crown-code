@@ -11,6 +11,7 @@ A vibe coding tui tool written in nim, similar to cline but with some additional
 │   ├── crown_code.nim            # Main entry point
 │   ├── context.nim               # Context buffer (linesBefore/linesAfter)
 │   ├── glob.nim                  # Glob pattern matching (fnmatch)
+│   ├── ignore_rules.nim          # .clineignore rule matching
 │   ├── pathutils.nim             # Path resolution and normalization
 │   ├── search.nim                # Regex search (std/re)
 │   ├── search_json.nim           # JSON search output formatting
@@ -67,9 +68,9 @@ DO NOT use `nim c` command directly in project root — use `make` instead
 5. After review or upon user request, update CHANGELOG.md. Modifying CHANGELOG.md before review is prohibited
 6. Check whether AGENTS.md needs to be updated
 7. Ask the user if they want to write a commit message; if so, present an English commit message preview for confirmation before committing. Direct submission is prohibited
-8. After confirmation, commit **all** changes and push
+8. After confirmation, commit **ALL** changes and push
 > - Plans must include detailed steps and specifics, including steps in the development process
-> - Before creating a plan, you must spawn a subagent to review it for feasibility and completeness
+> - Before creating a plan, you **MUST** spawn a subagent to review it for feasibility and completeness
 > - CHANGELOG and commit messages must not contain internal milestone numbers (e.g. "Phase 2.1")
 > - Commit message only lists project code files (`src/`, `tests/`, `config.nims`, etc.), excluding management files like `TODO.md`, `AGENTS.md`, `CHANGELOG.md`
 
