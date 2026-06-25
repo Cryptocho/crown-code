@@ -4,3 +4,4 @@ import test_context
 import test_glob
 import test_diff
 import test_search
+import test_search_json

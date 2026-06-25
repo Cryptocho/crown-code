@@ -1,5 +1,16 @@
 # Changelog
 
+## JSON 搜索输出格式化模块
+
+### Added
+- `src/search_json.nim`：JSON 搜索输出格式化，导出 4 个公共 API：`jsonEscape`（JSON 字符串转义，处理 `"`/`\`/`\n`/`\t`/`\r`）、`formatStartJson`（搜索起始标记）、`formatEndJson`（搜索结束标记）、`formatMatchJson`（匹配结果 JSON，支持 `context_before`/`context_after` 数组）
+- `tests/test_search_json.nim`：25 个测试用例，4 个套件（jsonEscape / formatStartJson / formatEndJson / formatMatchJson），覆盖特殊字符转义、上下文输出、nil 安全
+
+### Changed
+- `tests/test_runner.nim`：注册 `test_search_json` 测试模块
+
+- Affected files: `src/search_json.nim`, `tests/test_search_json.nim`, `tests/test_runner.nim`
+
 ## Search 正则搜索模块
 
 ### Added
@@ -9,7 +20,7 @@
 ### Changed
 - `tests/test_runner.nim`：注册 `test_search` 测试模块
 
-- Affected files: `src/search.nim`, `tests/test_search.nim`, `tests/test_runner.nim`, `TODO.md`
+- Affected files: `src/search.nim`, `tests/test_search.nim`, `tests/test_runner.nim`
 
 ## XDiff Unified Diff 引擎
 
@@ -19,9 +30,8 @@
 
 ### Changed
 - `tests/test_runner.nim`：注册 `test_diff` 测试模块
-- `TODO.md`：标记 XDiff 模块已完成
 
-- Affected files: `src/xdiff.nim`, `tests/test_diff.nim`, `tests/test_runner.nim`, `TODO.md`, `AGENTS.md`
+- Affected files: `src/xdiff.nim`, `tests/test_diff.nim`, `tests/test_runner.nim`
 
 ## Glob 通配符匹配模块
 
@@ -31,9 +41,8 @@
 
 ### Changed
 - `tests/test_runner.nim`：注册 `test_glob` 测试模块
-- `TODO.md`：标记 Glob 模块已完成
 
-- Affected files: `src/glob.nim`, `tests/test_glob.nim`, `tests/test_runner.nim`, `TODO.md`
+- Affected files: `src/glob.nim`, `tests/test_glob.nim`, `tests/test_runner.nim`
 
 ## Context 上下文缓冲模块
 
@@ -43,6 +52,5 @@
 
 ### Changed
 - `tests/test_runner.nim`：注册 `test_context` 测试模块
-- `TODO.md`：标记 Context 模块已完成
 
-- Affected files: `src/context.nim`, `tests/test_context.nim`, `tests/test_runner.nim`, `TODO.md`
+- Affected files: `src/context.nim`, `tests/test_context.nim`, `tests/test_runner.nim`

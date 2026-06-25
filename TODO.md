@@ -60,13 +60,13 @@
 ### 2.2 JSON 搜索输出格式化
 - **C 对应**：`temp/src/json.c` 中 `json_print_start()`, `json_print_end()`, `json_print_match()`, `json_escape()`
 - **依赖**：2.1 Search（`Match`, `Context` 类型）
-- [ ] 在 `src/search.nim` 中实现（或在 `src/search_json.nim` 中）
-- [ ] `json_escape()` → `jsonEscape(str: string): string`（避免与 `std/json.escapeJson` 冲突）
-- [ ] `json_print_match(out, match, ctx)` → `formatMatchJson(match: Match, ctx: Context): string`
-- [ ] `json_print_start(out, path)` → `formatStartJson(path: string): string`
-- [ ] `json_print_end(out)` → `formatEndJson(): string`
-- [ ] 创建 `tests/test_search_json.nim`
-- [ ] 更新 `tests/test_runner.nim`
+- [x] 创建 `src/search_json.nim`
+- [x] `json_escape()` → `jsonEscape(str: string): string`（避免与 `std/json.escapeJson` 冲突）
+- [x] `json_print_match(out, match, ctx)` → `formatMatchJson(match: Match, ctx: Context): string`
+- [x] `json_print_start(out, path)` → `formatStartJson(path: string): string`
+- [x] `json_print_end(out)` → `formatEndJson(): string`
+- [x] 创建 `tests/test_search_json.nim`
+- [x] 更新 `tests/test_runner.nim`
 
 ---
 

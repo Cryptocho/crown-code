@@ -63,8 +63,9 @@ DO NOT use `nim c` command directly in project root — use `make` instead
 7. Ask the user if they want to write a commit message; if so, present an English commit message preview for confirmation before committing. Direct submission is prohibited
 8. After confirmation, commit **all** changes and push
 > - Plans must include detailed steps and specifics, including steps in the development process
-> - Before creating a plan, you can must a subagent to review it for feasibility and completeness
+> - Before creating a plan, you must spawn a subagent to review it for feasibility and completeness
 > - CHANGELOG and commit messages must not contain internal milestone numbers (e.g. "Phase 2.1")
+> - Commit message only lists project code files (`src/`, `tests/`, `config.nims`, etc.), excluding management files like `TODO.md`, `AGENTS.md`, `CHANGELOG.md`
 
 ### Adding New Features
 
@@ -114,6 +115,8 @@ After creating a new test file (e.g., `tests/test_new_feature.nim`), just run `m
 Organize changes by feature module, using `## Feature Description` as the section title.
 
 Required field: `- Affected files:` list all changed file paths (wrapped in backticks). Newer changes come first.
+
+Note: `Affected files` only includes project code files (`src/`, `tests/`, `config.nims`, etc.), excluding management files like `TODO.md`, `AGENTS.md`, `CHANGELOG.md`.
 
 Common subheadings:
 - `### Added` — new features/files
