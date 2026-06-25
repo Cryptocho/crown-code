@@ -1,5 +1,16 @@
 # Changelog
 
+## Search 正则搜索模块
+
+### Added
+- `src/search.nim`：使用 `std/re`（PCRE 封装）替代 C 的 PCRE2 FFI，导出 5 个公共 API：`newSearch`（编译正则，支持 `soCaseInsensitive`/`soMultiLine`/`soDotAll` 选项）、`matchFirst`（单次匹配，返回 `Option[Match]`）、`matchAll`（全部匹配，返回 `seq[Match]`）、`calcLineNumber`（偏移量 → 1-based 行号）、`getLine`（行号 → 行内容）
+- `tests/test_search.nim`：29 个测试用例，7 个套件（newSearch / matchFirst / matchAll / calcLineNumber / getLine / options），覆盖无效正则、偏移匹配、跨行匹配、选项标志、边界情况
+
+### Changed
+- `tests/test_runner.nim`：注册 `test_search` 测试模块
+
+- Affected files: `src/search.nim`, `tests/test_search.nim`, `tests/test_runner.nim`, `TODO.md`
+
 ## XDiff Unified Diff 引擎
 
 ### Added

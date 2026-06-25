@@ -46,16 +46,16 @@
 ### 2.1 Search 正则搜索
 - **C 对应**：`temp/include/search.h`, `temp/src/search.c`
 - **依赖**：无（`std/re` 封装 PCRE，不直接 FFI）
-- [ ] 创建 `src/search.nim`
-- [ ] `match_t` → `Match` ref object（`lineNumber`, `columnStart`, `columnEnd`, `line`, `path`）
-- [ ] `search_t` / `search_compile(regex, options)` → `Search` ref object，用 `std/re` 的 `re()` / `re2()`
-- [ ] `search_match(s, text, len, result)` → `matchAll(s, text): seq[Match]`
-- [ ] `search_match_at(s, text, len, offset, result)` → 偏移匹配
-- [ ] `search_calc_line_number(text, offset)` → `strutils` 实现
-- [ ] `search_get_line(text, textLen, lineNumber)` → `splitLines()` 实现
-- [ ] `search_free(s)` → ORC 自动回收
-- [ ] 创建 `tests/test_search.nim`
-- [ ] 更新 `tests/test_runner.nim`
+- [x] 创建 `src/search.nim`
+- [x] `Match` ref object（`lineNumber`, `columnStart`, `columnEnd`, `line`, `path`）
+- [x] `Search` ref object，用 `std/re` 的 `re()` 编译
+- [x] `matchFirst(s, text, offset=0)` → `Option[Match]`
+- [x] `matchAll(s, text)` → `seq[Match]`
+- [x] `calcLineNumber(text, offset)` → `int`
+- [x] `getLine(text, lineNumber)` → `Option[string]`
+- [x] ORC 自动回收
+- [x] `SearchOption` enum（`soCaseInsensitive`, `soMultiLine`, `soDotAll`）
+- [x] 创建 `tests/test_search.nim`（29 个用例）
 
 ### 2.2 JSON 搜索输出格式化
 - **C 对应**：`temp/src/json.c` 中 `json_print_start()`, `json_print_end()`, `json_print_match()`, `json_escape()`

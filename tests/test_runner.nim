@@ -3,3 +3,4 @@ import test_template
 import test_context
 import test_glob
 import test_diff
+import test_search
