@@ -46,7 +46,7 @@ DO NOT use `nim c` command directly in project root — use `make` instead
 6. Check whether AGENTS.md needs to be updated
 7. Ask the user if they want to write a commit message; if so, present an English commit message preview for confirmation before committing. Direct submission is prohibited
 8. After confirmation, commit **all** changes and push
-> - Plans must include detailed steps and specifics, including steps in the development process
+> - Plans must include detailed steps and specifics, including steps in the development process, located in `.kilo/plans` in project root
 > - After creating a plan, you must use a subagent to review it for feasibility and completeness, then you can call `plan_exit`
 > - CHANGELOG和提交消息不应包含阶段数等内部内容
 

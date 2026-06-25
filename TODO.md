@@ -21,12 +21,12 @@
 ### 1.2 Glob 通配符匹配
 - **C 对应**：`temp/src/glob.c`
 - **依赖**：无
-- [ ] 创建 `src/glob.nim`
-- [ ] `glob_match(filename, pattern)` → `matchGlob(filename, pattern: string): bool`
-- [ ] `glob_matches(filename, patterns, count)` → `matchAnyGlob(filename: string, patterns: openArray[string]): bool`
-- [ ] 支持 `!` 否定前缀
-- [ ] 创建 `tests/test_glob.nim`
-- [ ] 更新 `tests/test_runner.nim`
+- [x] 创建 `src/glob.nim`
+- [x] `glob_match(filename, pattern)` → `matchGlob(filename, pattern: string): bool`
+- [x] `glob_matches(filename, patterns, count)` → `matchAnyGlob(filename: string, patterns: openArray[string]): bool`
+- [x] 支持 `!` 否定前缀
+- [x] 创建 `tests/test_glob.nim`
+- [x] 更新 `tests/test_runner.nim`
 
 ### 1.3 XDiff Diff 引擎
 - **C 对应**：`temp/include/xdiff.h`, `temp/src/xdiff.c`
