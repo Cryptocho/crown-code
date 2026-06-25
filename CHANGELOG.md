@@ -1,5 +1,16 @@
 # Changelog
 
+## 文件写入模块
+
+### Added
+- `src/file_writer.nim`：文件写入与缓存失效模块。依赖 `pathutils`（路径解析）、`ignore_rules`（clineignore 检测）和 `file_reader`（`cacheInvalidate`）。公共类型：`FileWriterError`（枚举，Success/NullPath/FileNotFound/PermissionDenied/WriteFailed）、`FileWriterResult`（error/errorMessage）。主入口 `writeFileContent`（6 步流程：参数验证 → clineignore → 路径解析 → 文件写入 → 缓存失效 → 返回成功）。`writeFileContent` 使用 `content: string = ""` 默认参数，对应 C 的 NULL content 处理
+- `tests/test_file_writer.nim`：8 个测试用例，5 个套件（error handling / basic functionality / caching / access control / write failure），覆盖空路径、文件写入、空内容写入、缓存失效验证、clineignore 拦截、不存在目录写入、只读目录写入、重复写入缓存行为
+
+### Changed
+- `tests/test_runner.nim`：注册 `test_file_writer` 测试模块
+
+- Affected files: `src/file_writer.nim`, `tests/test_file_writer.nim`, `tests/test_runner.nim`
+
 ## 文件读取模块
 
 ### Added

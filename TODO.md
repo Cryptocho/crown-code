@@ -107,11 +107,11 @@
 ### 3.4 文件写入
 - **C 对应**：`tools.c` 中 `file_write()`
 - **依赖**：3.1 路径, 3.2 ignore
-- [ ] 创建 `src/file_writer.nim`
-- [ ] `writeFileContent(path, content: string): FileReaderError`（避免与 `os.writeFile` 冲突）
-- [ ] 写入后缓存失效
-- [ ] 创建 `tests/test_file_writer.nim`
-- [ ] 更新 `tests/test_runner.nim`
+- [x] 创建 `src/file_writer.nim`
+- [x] `writeFileContent(path, content: string): FileWriterResult`（避免与 `os.writeFile` 冲突）
+- [x] 写入后缓存失效（`cacheInvalidate`）
+- [x] 创建 `tests/test_file_writer.nim`（8 个测试用例）
+- [x] 更新 `tests/test_runner.nim`
 
 ### 3.5 文件编辑（精确替换）
 - **C 对应**：`tools.c` 中 `file_edit()`, `split_into_lines()`, `join_lines()`
