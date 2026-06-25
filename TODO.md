@@ -116,12 +116,12 @@
 ### 3.5 文件编辑（精确替换）
 - **C 对应**：`tools.c` 中 `file_edit()`, `split_into_lines()`, `join_lines()`
 - **依赖**：3.1 路径, 3.4 写入
-- [ ] 创建 `src/file_edit.nim`
-- [ ] `editFile(path, oldStr, newStr: string, multiple: bool): FileEditResult`
-- [ ] 行级精确匹配：先找 `oldStr`，确认匹配次数，替换
-- [ ] 错误码：未找到 / 多次匹配 / 读写失败 / 内存
-- [ ] 创建 `tests/test_file_edit.nim`
-- [ ] 更新 `tests/test_runner.nim`
+- [x] 创建 `src/file_edit.nim`
+- [x] `editFile(path, oldStr, newStr: string, multiple: bool): FileEditResult`
+- [x] 行级精确匹配：先找 `oldStr`，确认匹配次数，替换
+- [x] 错误码：未找到 / 多次匹配 / 读写失败
+- [x] 创建 `tests/test_file_edit.nim`（15 个测试用例）
+- [x] 更新 `tests/test_runner.nim`
 
 ### 3.6 代码格式化
 - **C 对应**：`tools.c` 中 `format_file()`, `process_content()`

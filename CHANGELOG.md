@@ -1,5 +1,16 @@
 # Changelog
 
+## 文件编辑模块
+
+### Added
+- `src/file_edit.nim`：文件行级精确替换模块。依赖 `pathutils`（路径解析）、`ignore_rules`（clineignore 检测）、`file_writer`（文件写入）。公共类型：`FileEditError`（枚举，Success/FileNotFound/OldStringNotFound/MultipleMatches/ReadFailed/WriteFailed）、`FileEditResult`（error/errorMessage/matchCount）。内部辅助函数 `splitIntoLines`（按 `\n` 拆分，保留末尾空行）和 `joinLines`（行间插入 `\n`，末尾不加 `\n`）。主入口 `editFile`（10 步流程：路径解析 → clineignore → 文件读取 → 按行拆分 → 精确匹配计数 → 未找到/多次匹配检测 → 行替换 → 按行合并 → 写入文件 → 返回结果）。`editFile` 的 `multiple` 参数控制是否替换所有匹配行
+- `tests/test_file_edit.nim`：15 个测试用例，5 个套件（error handling / basic functionality / edge cases / access control），覆盖空路径、文件不存在、未找到 oldStr、多次匹配、单次精确替换、全部替换、首行/末行/单行替换、空 oldStr 匹配空行、newStr 含换行、尾随换行符、空文件、clineignore 拦截
+
+### Changed
+- `tests/test_runner.nim`：注册 `test_file_edit` 测试模块
+
+- Affected files: `src/file_edit.nim`, `tests/test_file_edit.nim`, `tests/test_runner.nim`
+
 ## 文件写入模块
 
 ### Added
