@@ -11,6 +11,9 @@ A vibe coding tui tool written in nim, similar to cline but with some additional
 │   ├── crown_code.nim            # Main entry point
 │   ├── context.nim               # Context buffer (linesBefore/linesAfter)
 │   ├── glob.nim                  # Glob pattern matching (fnmatch)
+│   ├── pathutils.nim             # Path resolution and normalization
+│   ├── search.nim                # Regex search (std/re)
+│   ├── search_json.nim           # JSON search output formatting
 │   └── xdiff.nim                 # Unified diff engine (Myers O(ND))
 ├── tests/                        # Nim test files (.nim)
 │   ├── test_runner.nim           # Test entry point (imports all suites)
@@ -18,7 +21,10 @@ A vibe coding tui tool written in nim, similar to cline but with some additional
 │   ├── test_template.nim         # Bootstrap template test
 │   ├── test_context.nim          # Context tests (5 cases)
 │   ├── test_glob.nim             # Glob tests (32 cases)
-│   └── test_diff.nim             # XDiff tests (19 cases)
+│   ├── test_pathutils.nim        # Path utils tests (14 cases)
+│   ├── test_diff.nim             # XDiff tests (19 cases)
+│   ├── test_search.nim           # Search tests (29 cases)
+│   └── test_search_json.nim      # JSON search output tests (25 cases)
 ├── build/                        # Build output directory
 │   ├── debug/                    # Debug binary
 │   ├── release/                  # Release binary

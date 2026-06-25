@@ -75,12 +75,12 @@
 ### 3.1 路径解析
 - **C 对应**：`tools.c` 中 `resolve_workspace_path()`, `to_rel_path()`, `resolve_path()`
 - **依赖**：无
-- [ ] 创建 `src/pathutils.nim`
-- [ ] 绝对路径 / 相对路径解析
-- [ ] 相对路径计算
-- [ ] 跨平台路径分隔符标准化
-- [ ] 创建 `tests/test_pathutils.nim`
-- [ ] 更新 `tests/test_runner.nim`
+- [x] 创建 `src/pathutils.nim`
+- [x] 绝对路径 / 相对路径解析
+- [x] 相对路径计算
+- [x] 跨平台路径分隔符标准化
+- [x] 创建 `tests/test_pathutils.nim`
+- [x] 更新 `tests/test_runner.nim`
 
 ### 3.2 clineignore 规则
 - **C 对应**：`tools.c` 中 `IgnoreRules`, `load_ignore_file()`, `init_ignore_rules()`, `check_ignore_path()`, `match_ignore_pattern()`

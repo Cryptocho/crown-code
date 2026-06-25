@@ -1,5 +1,16 @@
 # Changelog
 
+## 路径解析模块
+
+### Added
+- `src/pathutils.nim`：三个路径解析 proc：`resolveWorkspacePath`（相对/绝对路径解析）、`toRelPath`（相对路径计算，反斜杠归一化为正斜杠）、`resolvePath`（返回 `(absolutePath, displayPath)` 元组）
+- `tests/test_pathutils.nim`：14 test cases, 4 suites（normalizeSlashes / resolveWorkspacePath / toRelPath / resolvePath），covers separator normalization, CWD prefix stripping, backslash conversion, custom cwd parameter
+
+### Changed
+- `tests/test_runner.nim`：注册 `test_pathutils` 测试模块
+
+- Affected files: `src/pathutils.nim`, `tests/test_pathutils.nim`, `tests/test_runner.nim`
+
 ## JSON 搜索输出格式化模块
 
 ### Added
