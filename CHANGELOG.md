@@ -1,5 +1,13 @@
 # Changelog
 
+## 文件读取模块
+
+### Added
+- `src/file_reader.nim`：文件读取与格式化输出模块。依赖 `pathutils`（路径解析）和 `ignore_rules`（clineignore 检测）。公共类型：`FileReaderError`（枚举，SUCCESS/NULL_PATH/FILE_NOT_FOUND/PERMISSION_DENIED/READ_FAILED/MEMORY_ALLOC）、`LineRange`（startLine/endLine/totalLines/truncated）、`FileReaderResult`（content/range/error/errorMessage）、`FileCacheEntry`。缓存子系统：256 槽位哈希表（大小写不敏感 hash），`cacheGet`/`cacheSet`/`cacheInvalidate` 三接口。辅助函数：`getFileMtime`（`getLastModificationTime` 封装）、`countLines`（`\n` 计数）、`parseLineRange`（范围解析与自动交换）、`formatContentWithLineNumbers`（`行号 | 内容` 格式化 + 尾部文件统计）。主入口 `readFileRange`（12 步流程：参数验证 → clineignore → 路径解析 → 缓存 + mtime 检测 → 重复读取警告([File already read]/[DUPLICATE READ]) → 文件读取 → 行统计 → 格式化 → 拼接输出）
+- `tests/test_file_reader.nim`：15 个测试用例，5 个套件（error handling / basic functionality / caching / large files / path resolution），覆盖 null 路径、空路径、文件不存在、基础行号格式化、行范围读取、范围交换、超出 EOF、单行文件、缓存重复读取警告（3 次语义）、mtime 变化驱逐、大文件（2000 行）、绝对路径、相对路径
+
+- Affected files: `src/file_reader.nim`, `tests/test_file_reader.nim`, `tests/test_runner.nim`
+
 ## clineignore 忽略规则模块
 
 ### Added

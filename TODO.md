@@ -96,13 +96,13 @@
 ### 3.3 文件读取
 - **C 对应**：`tools.c` 中 `file_read()`, `read_file_content()`, `count_lines()`, `format_content_with_line_numbers()`, `parse_line_range()`, `FileReadCacheEntry`
 - **依赖**：3.1 路径, 3.2 ignore
-- [ ] 创建 `src/file_reader.nim`
-- [ ] `readFileRange(path, startLine, endLine): FileReaderResult`（避免与 `os.readFile` 冲突）
-- [ ] 行号格式化输出（`$lineNum | content`）
-- [ ] 重复读取缓存（256 槽哈希表 + mtime 检测）
-- [ ] 重复读取警告（第 2 次"已读"，第 3 次起"[DUPLICATE READ]"）
-- [ ] 创建 `tests/test_file_reader.nim`
-- [ ] 更新 `tests/test_runner.nim`
+- [x] 创建 `src/file_reader.nim`
+- [x] `readFileRange(path, startLine, endLine): FileReaderResult`（避免与 `os.readFile` 冲突）
+- [x] 行号格式化输出（`$lineNum | content`）
+- [x] 重复读取缓存（256 槽哈希表 + mtime 检测）
+- [x] 重复读取警告（第 2 次"[File already read]"，第 3 次起"[DUPLICATE READ]"）
+- [x] 创建 `tests/test_file_reader.nim`（15 个测试用例）
+- [x] 更新 `tests/test_runner.nim`
 
 ### 3.4 文件写入
 - **C 对应**：`tools.c` 中 `file_write()`

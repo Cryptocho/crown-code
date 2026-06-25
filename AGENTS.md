@@ -13,11 +13,13 @@ A vibe coding tui tool written in nim, similar to cline but with some additional
 │   ├── glob.nim                  # Glob pattern matching (fnmatch)
 │   ├── ignore_rules.nim          # .clineignore rule matching
 │   ├── pathutils.nim             # Path resolution and normalization
+│   ├── file_reader.nim           # File reading with line numbering + cache
 │   ├── search.nim                # Regex search (std/re)
 │   ├── search_json.nim           # JSON search output formatting
 │   └── xdiff.nim                 # Unified diff engine (Myers O(ND))
 ├── tests/                        # Nim test files (.nim)
 │   ├── test_runner.nim           # Test entry point (imports all suites)
+│   ├── test_file_reader.nim      # File reader tests (15 cases)
 │   ├── config.nims               # Test config (--path:src)
 │   ├── test_template.nim         # Bootstrap template test
 │   ├── test_context.nim          # Context tests (5 cases)

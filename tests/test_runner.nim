@@ -7,3 +7,4 @@ import test_pathutils
 import test_search
 import test_search_json
 import test_ignore_rules
+import test_file_reader
