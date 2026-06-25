@@ -30,14 +30,14 @@
 
 ### 1.3 XDiff Diff 引擎
 - **C 对应**：`temp/include/xdiff.h`, `temp/src/xdiff.c`
-- **依赖**：无
-- [ ] 创建 `src/xdiff.nim`（避免与 `std/diff` 模块名冲突）
-- [ ] 评估 `std/diff` 是否满足需求，不满足则移植 Myers diff 算法
-- [ ] `mmfile_t` / `memallocator_t` → `string` + ORC 自动管理替代
-- [ ] `xdl_diff(mf1, mf2, xpp, xecfg, ecb)` → `diff(a, b: string): string`（避免 `new` 与 Nim 关键字冲突）
-- [ ] 输出 unified diff 格式
-- [ ] 创建 `tests/test_diff.nim`
-- [ ] 更新 `tests/test_runner.nim`
+- **依赖**：`std/experimental/diff`（Myers O(ND) 算法）
+- [x] 创建 `src/xdiff.nim`（避免与 `std/diff` 模块名冲突）
+- [x] 评估 `std/diff` 是否满足需求 → 使用 `experimental/diff.diffText` 作为算法引擎
+- [x] `mmfile_t` / `memallocator_t` → `string` + ORC 自动管理替代
+- [x] `xdl_diff(mf1, mf2, xpp, xecfg, ecb)` → `diff*(a, b: string; ctxLen: int = 3): string`
+- [x] 输出 unified diff 格式（含 `\ No newline` 标记，0 计数 hunk header，上下文窗口合并）
+- [x] 创建 `tests/test_diff.nim`（19 个测试用例，5 个测试套件）
+- [x] 更新 `tests/test_runner.nim`
 
 ---
 

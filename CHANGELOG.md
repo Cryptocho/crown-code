@@ -1,5 +1,17 @@
 # Changelog
 
+## XDiff Unified Diff 引擎
+
+### Added
+- `src/xdiff.nim`：基于 `experimental/diff.diffText`（Myers O(ND)）的 unified diff 引擎，导出 `diff*` 公共 API（`diff*(a, b: string; ctxLen: int = 3): string`）。支持上下文窗口合并（间距 ≤ 2×ctxLen）、0 计数 hunk header（pure addition/deletion）、`\ No newline at end of file` 内联标记、尾部换行符差异检测
+- `tests/test_diff.nim`：19 个测试用例，5 个套件（basic / single change / context window / edge cases），覆盖空输入、换行符边界、上下文窗口、hunk 合并、header 格式
+
+### Changed
+- `tests/test_runner.nim`：注册 `test_diff` 测试模块
+- `TODO.md`：标记 XDiff 模块已完成
+
+- Affected files: `src/xdiff.nim`, `tests/test_diff.nim`, `tests/test_runner.nim`, `TODO.md`, `AGENTS.md`
+
 ## Glob 通配符匹配模块
 
 ### Added

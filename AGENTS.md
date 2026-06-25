@@ -7,18 +7,34 @@ A vibe coding tui tool written in nim, similar to cline but with some additional
 
 ```
 .
-├── src/                # Nim source files (.nim)
-├── tests/              # Nim test files (.nim)
-├── build/              # Build output directory
-├── temp/               # C code migration reference (historical)
-├── crown_code.nimble   # Nimble package file (build, test, deps)
-├── config.nims         # Project-level Nim config (mm:orc, threads:on)
-├── Makefile            # Build script (wraps nimble, moves binary)
-├── .gitignore          # Git ignore rules
-├── AGENTS.md           # This file
-├── cline/              # cline source code for reference
-├── CLINE.md            # cline content description
-└── CHANGELOG.md
+├── src/                          # Nim source files (.nim)
+│   ├── crown_code.nim            # Main entry point
+│   ├── context.nim               # Context buffer (linesBefore/linesAfter)
+│   ├── glob.nim                  # Glob pattern matching (fnmatch)
+│   └── xdiff.nim                 # Unified diff engine (Myers O(ND))
+├── tests/                        # Nim test files (.nim)
+│   ├── test_runner.nim           # Test entry point (imports all suites)
+│   ├── config.nims               # Test config (--path:src)
+│   ├── test_template.nim         # Bootstrap template test
+│   ├── test_context.nim          # Context tests (5 cases)
+│   ├── test_glob.nim             # Glob tests (32 cases)
+│   └── test_diff.nim             # XDiff tests (19 cases)
+├── build/                        # Build output directory
+│   ├── debug/                    # Debug binary
+│   ├── release/                  # Release binary
+│   └── test/                     # Test runner binary
+├── temp/                         # C code migration reference (historical)
+├── crown_code.nimble             # Nimble package file (build, test, deps)
+├── config.nims                   # Project-level Nim config (mm:orc, threads:on)
+├── Makefile                      # Build script (wraps nimble, moves binary)
+├── .gitignore                    # Git ignore rules
+├── .kilo/                        # Kilo planning and config
+│   └── plans/                    # Implementation plans
+├── TODO.md                       # Migration progress tracker
+├── CHANGELOG.md                  # Feature-level changelog
+├── AGENTS.md                     # This file
+├── cline/                        # cline source code for reference
+└── CLINE.md                      # cline content description
 ```
 
 ## Workflow
