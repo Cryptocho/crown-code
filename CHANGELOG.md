@@ -1,5 +1,16 @@
 # Changelog
 
+## 代码格式化模块
+
+### Added
+- `src/formatter.nim`：文件代码格式化模块。依赖 `pathutils`（路径解析）。公共类型：`FormatterError`（枚举，Success/NullPath/ReadFailed/MemoryAlloc）、`FormatterResult`（error/errorMessage）。内部 `processContent`（逐字符迭代，行尾空白修剪 + 行首空白规范化：含制表符替换为 4 空格、只有空格完全移除，保留原有空行结构）。主入口 `formatFile`（6 步流程：参数验证 → 路径解析 → 文件读取 → processContent → 文件覆盖写入 → 返回结果）
+- `tests/test_formatter.nim`：10 个测试用例，2 个套件（error handling / content formatting），覆盖空路径、文件不存在、行尾空格修剪、行首 Tab 替换、混合空白处理、空格+Tab 混合、纯空格行首移除、无末尾换行保留、空文件
+
+### Changed
+- `tests/test_runner.nim`：注册 `test_formatter` 测试模块
+
+- Affected files: `src/formatter.nim`, `tests/test_formatter.nim`, `tests/test_runner.nim`
+
 ## 文件编辑模块
 
 ### Added

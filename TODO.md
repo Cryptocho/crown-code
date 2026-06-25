@@ -126,12 +126,12 @@
 ### 3.6 代码格式化
 - **C 对应**：`tools.c` 中 `format_file()`, `process_content()`
 - **依赖**：3.1 路径
-- [ ] 创建 `src/formatter.nim`
-- [ ] Tab 转 4 空格
-- [ ] 行尾空白修剪
-- [ ] 保留原有空行
-- [ ] 创建 `tests/test_formatter.nim`
-- [ ] 更新 `tests/test_runner.nim`
+- [x] 创建 `src/formatter.nim`
+- [x] Tab 转 4 空格
+- [x] 行尾空白修剪
+- [x] 保留原有空行
+- [x] 创建 `tests/test_formatter.nim`（10 个测试用例）
+- [x] 更新 `tests/test_runner.nim`
 
 ### 3.7 Shell 检测
 - **C 对应**：`tools.c` 中 `detect_shells()`

@@ -10,3 +10,4 @@ import test_ignore_rules
 import test_file_reader
 import test_file_writer
 import test_file_edit
+import test_formatter
