@@ -1,0 +1,19 @@
+# Nim compilation artifacts
+nimcache/
+*.exe
+*.pdb
+*.ilk
+
+# Build output
+build/
+crown_code
+tests/test_runner
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+
+cline/
+temp/

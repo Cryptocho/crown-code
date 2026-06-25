@@ -1,0 +1,269 @@
+# C → Nim 迁移 TODO
+
+> 目标：将 `temp/` 中的 C 代码全部迁移到 Nim，项目代码中不使用 FFI（`std/` 底层封装不在此限）。
+
+---
+
+## Phase 1: 基础工具（无依赖）
+
+### 1.1 Context 上下文缓冲
+- **C 对应**：`temp/src/context.c`
+- **依赖**：无
+- [x] 创建 `src/context.nim`
+- [x] `context_t` → `ref object`（`linesBefore: seq[string]`, `linesAfter: seq[string]`）
+- [x] `context_create(before, after)` → `newContext(before, after: int)`
+- [x] `context_add_line(ctx, line)` → `addLine(ctx, line: string)`
+- [x] `context_reset(ctx)` → `clearContext(ctx)`（避免与 `system.reset` 冲突）
+- [x] `context_free(ctx)` → ORC 自动回收
+- [x] 创建 `tests/test_context.nim`
+- [x] 更新 `tests/test_runner.nim`
+
+### 1.2 Glob 通配符匹配
+- **C 对应**：`temp/src/glob.c`
+- **依赖**：无
+- [ ] 创建 `src/glob.nim`
+- [ ] `glob_match(filename, pattern)` → `matchGlob(filename, pattern: string): bool`
+- [ ] `glob_matches(filename, patterns, count)` → `matchAnyGlob(filename: string, patterns: openArray[string]): bool`
+- [ ] 支持 `!` 否定前缀
+- [ ] 创建 `tests/test_glob.nim`
+- [ ] 更新 `tests/test_runner.nim`
+
+### 1.3 XDiff Diff 引擎
+- **C 对应**：`temp/include/xdiff.h`, `temp/src/xdiff.c`
+- **依赖**：无
+- [ ] 创建 `src/xdiff.nim`（避免与 `std/diff` 模块名冲突）
+- [ ] 评估 `std/diff` 是否满足需求，不满足则移植 Myers diff 算法
+- [ ] `mmfile_t` / `memallocator_t` → `string` + ORC 自动管理替代
+- [ ] `xdl_diff(mf1, mf2, xpp, xecfg, ecb)` → `diff(a, b: string): string`（避免 `new` 与 Nim 关键字冲突）
+- [ ] 输出 unified diff 格式
+- [ ] 创建 `tests/test_diff.nim`
+- [ ] 更新 `tests/test_runner.nim`
+
+---
+
+## Phase 2: 搜索系统
+
+### 2.1 Search 正则搜索
+- **C 对应**：`temp/include/search.h`, `temp/src/search.c`
+- **依赖**：无（`std/re` 封装 PCRE，不直接 FFI）
+- [ ] 创建 `src/search.nim`
+- [ ] `match_t` → `Match` ref object（`lineNumber`, `columnStart`, `columnEnd`, `line`, `path`）
+- [ ] `search_t` / `search_compile(regex, options)` → `Search` ref object，用 `std/re` 的 `re()` / `re2()`
+- [ ] `search_match(s, text, len, result)` → `matchAll(s, text): seq[Match]`
+- [ ] `search_match_at(s, text, len, offset, result)` → 偏移匹配
+- [ ] `search_calc_line_number(text, offset)` → `strutils` 实现
+- [ ] `search_get_line(text, textLen, lineNumber)` → `splitLines()` 实现
+- [ ] `search_free(s)` → ORC 自动回收
+- [ ] 创建 `tests/test_search.nim`
+- [ ] 更新 `tests/test_runner.nim`
+
+### 2.2 JSON 搜索输出格式化
+- **C 对应**：`temp/src/json.c` 中 `json_print_start()`, `json_print_end()`, `json_print_match()`, `json_escape()`
+- **依赖**：2.1 Search（`Match`, `Context` 类型）
+- [ ] 在 `src/search.nim` 中实现（或在 `src/search_json.nim` 中）
+- [ ] `json_escape()` → `jsonEscape(str: string): string`（避免与 `std/json.escapeJson` 冲突）
+- [ ] `json_print_match(out, match, ctx)` → `formatMatchJson(match: Match, ctx: Context): string`
+- [ ] `json_print_start(out, path)` → `formatStartJson(path: string): string`
+- [ ] `json_print_end(out)` → `formatEndJson(): string`
+- [ ] 创建 `tests/test_search_json.nim`
+- [ ] 更新 `tests/test_runner.nim`
+
+---
+
+## Phase 3: 文件工具（依赖 search / xdiff / glob）
+
+### 3.1 路径解析
+- **C 对应**：`tools.c` 中 `resolve_workspace_path()`, `to_rel_path()`, `resolve_path()`
+- **依赖**：无
+- [ ] 创建 `src/pathutils.nim`
+- [ ] 绝对路径 / 相对路径解析
+- [ ] 相对路径计算
+- [ ] 跨平台路径分隔符标准化
+- [ ] 创建 `tests/test_pathutils.nim`
+- [ ] 更新 `tests/test_runner.nim`
+
+### 3.2 clineignore 规则
+- **C 对应**：`tools.c` 中 `IgnoreRules`, `load_ignore_file()`, `init_ignore_rules()`, `check_ignore_path()`, `match_ignore_pattern()`
+- **依赖**：3.1 路径解析
+- [ ] 创建 `src/ignore_rules.nim`
+- [ ] 加载全局 `~/.cline/data/.clineignore`
+- [ ] 加载项目级 `.clineignore`
+- [ ] fnmatch 匹配逻辑
+- [ ] `checkIgnorePath(path: string): bool`
+- [ ] 创建 `tests/test_ignore_rules.nim`
+- [ ] 更新 `tests/test_runner.nim`
+
+### 3.3 文件读取
+- **C 对应**：`tools.c` 中 `file_read()`, `read_file_content()`, `count_lines()`, `format_content_with_line_numbers()`, `parse_line_range()`, `FileReadCacheEntry`
+- **依赖**：3.1 路径, 3.2 ignore
+- [ ] 创建 `src/file_reader.nim`
+- [ ] `readFileRange(path, startLine, endLine): FileReaderResult`（避免与 `os.readFile` 冲突）
+- [ ] 行号格式化输出（`$lineNum | content`）
+- [ ] 重复读取缓存（256 槽哈希表 + mtime 检测）
+- [ ] 重复读取警告（第 2 次"已读"，第 3 次起"[DUPLICATE READ]"）
+- [ ] 创建 `tests/test_file_reader.nim`
+- [ ] 更新 `tests/test_runner.nim`
+
+### 3.4 文件写入
+- **C 对应**：`tools.c` 中 `file_write()`
+- **依赖**：3.1 路径, 3.2 ignore
+- [ ] 创建 `src/file_writer.nim`
+- [ ] `writeFileContent(path, content: string): FileReaderError`（避免与 `os.writeFile` 冲突）
+- [ ] 写入后缓存失效
+- [ ] 创建 `tests/test_file_writer.nim`
+- [ ] 更新 `tests/test_runner.nim`
+
+### 3.5 文件编辑（精确替换）
+- **C 对应**：`tools.c` 中 `file_edit()`, `split_into_lines()`, `join_lines()`
+- **依赖**：3.1 路径, 3.4 写入
+- [ ] 创建 `src/file_edit.nim`
+- [ ] `editFile(path, oldStr, newStr: string, multiple: bool): FileEditResult`
+- [ ] 行级精确匹配：先找 `oldStr`，确认匹配次数，替换
+- [ ] 错误码：未找到 / 多次匹配 / 读写失败 / 内存
+- [ ] 创建 `tests/test_file_edit.nim`
+- [ ] 更新 `tests/test_runner.nim`
+
+### 3.6 代码格式化
+- **C 对应**：`tools.c` 中 `format_file()`, `process_content()`
+- **依赖**：3.1 路径
+- [ ] 创建 `src/formatter.nim`
+- [ ] Tab 转 4 空格
+- [ ] 行尾空白修剪
+- [ ] 保留原有空行
+- [ ] 创建 `tests/test_formatter.nim`
+- [ ] 更新 `tests/test_runner.nim`
+
+### 3.7 Shell 检测
+- **C 对应**：`tools.c` 中 `detect_shells()`
+- **依赖**：无
+- [ ] 创建 `src/shell_detect.nim`
+- [ ] POSIX: `getEnv("SHELL")`
+- [ ] Windows: PATH 中查找 bash.exe / pwsh.exe / powershell.exe / cmd.exe + 额外路径
+- [ ] 创建 `tests/test_shell_detect.nim`
+- [ ] 更新 `tests/test_runner.nim`
+
+### 3.8 命令执行
+- **C 对应**：`tools.c` 中 `execute_command()`, `split_commands()`, `trim_whitespace()`, `CircularBuffer`
+- **依赖**：3.7 Shell 检测
+- [ ] 创建 `src/command_exec.nim`
+- [ ] `execCommand(command: string, blacklist: openArray[string]): CommandResult`
+- [ ] 命令拆分（支持 `&&`, `||`, `|`, `;`, `&`）
+- [ ] 审批检查（黑名单匹配 + 用户确认 TODO）
+- [ ] 子进程启动 → `std/osproc.startProcess()`
+- [ ] stdout/stderr 流式捕获（环形缓冲区 `CircularBuffer` → `Deque[string]`）
+- [ ] Timeout（`DEFAULT_TIMEOUT_SECONDS = 300`）
+- [ ] 最大输出限制（`MAX_FULL_OUTPUT_SIZE = 1MB`）
+- [ ] 执行时间统计
+- [ ] 创建 `tests/test_command_exec.nim`
+- [ ] 更新 `tests/test_runner.nim`
+
+### 3.9 目录列表
+- **C 对应**：`tools.c` 中 `list_files()`
+- **依赖**：3.1 路径, 3.2 ignore
+- [ ] 创建 `src/list_files.nim`
+- [ ] `listFiles(path: string): ListFilesResult`
+- [ ] 目录遍历 → `os.walkDir()`
+- [ ] `.` / `..` 过滤
+- [ ] 排序：目录优先 → 字母序
+- [ ] 限制：`MAX_LIST_ENTRIES = 200`
+- [ ] 创建 `tests/test_list_files.nim`
+- [ ] 更新 `tests/test_runner.nim`
+
+### 3.10 文件内容搜索
+- **C 对应**：`tools.c` 中 `search_files()`, `search_dir()`, `search_file()`
+- **依赖**：2.1 Search, 1.2 Glob, 3.1 路径, 3.2 ignore
+- [ ] 创建 `src/search_files.nim`
+- [ ] `searchFiles(directory, regex, filePattern: string): SearchFilesResult`
+- [ ] 递归目录搜索（深度限制 `MAX_SEARCH_DEPTH = 10`）
+- [ ] clineignore 检查
+- [ ] 匹配结果格式化（路径标题 + 上下文行）
+- [ ] 输出截断（`MAX_SEARCH_OUTPUT = 256KB`）
+- [ ] 创建 `tests/test_search_files.nim`
+- [ ] 更新 `tests/test_runner.nim`
+
+---
+
+## Phase 4: MCP 客户端（独立协议栈，无项目内依赖）
+
+### 4.1 JSON-RPC 通信层
+- **依赖**：无（用 `std/json`）
+- [ ] 创建 `src/mcp/jsonrpc.nim`
+- [ ] `buildRequest(method, params: string): string`
+- [ ] `buildNotification(method, params: string): string`
+- [ ] `parseResponse(json: string): JsonNode`
+- [ ] 创建 `tests/test_mcp_jsonrpc.nim`
+- [ ] 更新 `tests/test_runner.nim`
+
+### 4.2 stdio 传输
+- **C 对应**：`mcp.c` 中 `internal_io_spawn_child()`, `internal_io_read_line()`, `internal_io_write_line()`
+- **依赖**：4.1 JSON-RPC
+- [ ] 创建 `src/mcp/transport_stdio.nim`
+- [ ] 子进程启动：`osproc.startProcess(command, args)`
+- [ ] 行读取/写入（JSON-RPC newline-delimited）
+- [ ] stderr 转发
+- [ ] 进程关闭（SIGTERM → 等 5s → SIGKILL）
+- [ ] 创建 `tests/test_mcp_stdio.nim`
+- [ ] 更新 `tests/test_runner.nim`
+
+### 4.3 HTTP/Streamable 传输
+- **C 对应**：`mcp.c` 中 `internal_tls_connect()`, `internal_http_post()`
+- **依赖**：4.1 JSON-RPC, `std/net`, `std/httpclient`
+- [ ] 创建 `src/mcp/transport_http.nim`
+- [ ] DNS 解析 → `net.getAddrInfo()`
+- [ ] TLS socket 连接 → `net.newContext()` + `wrapSocket()`
+- [ ] HTTP POST 请求构建 / 响应解析
+- [ ] Chunked transfer encoding
+- [ ] Bearer token 认证 + 401 处理
+- [ ] 创建 `tests/test_mcp_http.nim`
+- [ ] 更新 `tests/test_runner.nim`
+
+### 4.4 MCP 客户端核心
+- **C 对应**：`mcp.c` 中 `mcp_client_t` 及对外 API
+- **依赖**：4.2 stdio 传输, 4.3 HTTP 传输
+- [ ] 创建 `src/mcp/client.nim`
+- [ ] `McpClientConfig` 配置对象
+- [ ] `McpClient` ref object（状态、IO、requestId、锁）
+- [ ] `newMcpClient(config): McpClient`
+- [ ] `initialize()` — JSON-RPC `initialize` + `notifications/initialized`
+- [ ] `callTool(name, arguments): McpCallToolResult`
+- [ ] `listTools(): seq[McpTool]`
+- [ ] 心跳线程：定期 `ping`，断线自动重连
+- [ ] 自动重连（指数退避：`maxReconnect`, `maxReconnectDelay`）
+- [ ] 连接状态管理（`McpConnectionState` 枚举）
+- [ ] 线程安全（`std/locks`）
+- [ ] 创建 `tests/test_mcp_client.nim`（需 mock MCP server）
+- [ ] 更新 `tests/test_runner.nim`
+- [ ] 参照 `temp/tests/mock_mcp_server.py` 创建 `tests/mock_mcp_server.nim`
+
+### 4.5 MCP Registry（多 server 管理）
+- **C 对应**：`temp/include/mcp_registry.h`
+- **依赖**：4.4 MCP 客户端
+- [ ] 创建 `src/mcp/registry.nim`
+- [ ] `McpRegistry` ref object：`Table[string, McpClient]`
+- [ ] `loadJsonConfig(configJson: string)`
+- [ ] `getClient(name: string): McpClient`
+- [ ] 状态回调
+- [ ] 错误处理
+- [ ] 创建 `tests/test_mcp_registry.nim`
+- [ ] 更新 `tests/test_runner.nim`
+
+---
+
+## Phase 5: 组装入口
+
+- [ ] 更新 `src/crown_code.nim` 导入所有功能模块
+- [ ] 实现主流程逻辑
+- [ ] `make debug` 构建验证
+- [ ] `make test` 全部测试通过
+
+---
+
+## 完成度追踪
+
+| Phase | 内容 | 依赖 | 预计工时 |
+|-------|------|------|----------|
+| 1: 基础工具 | context, glob, xdiff | 无 | 中 |
+| 2: 搜索系统 | search + json 输出 | 1 | 小 |
+| 3: 文件工具 | 10 个子模块 | 1, 2 | 大 |
+| 4: MCP 客户端 | 5 个子模块 | 无项目内依赖 | 大 |
+| 5: 组装 | main + 验证 | 1-4 | 小 |
