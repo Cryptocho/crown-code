@@ -136,11 +136,11 @@
 ### 3.7 Shell 检测
 - **C 对应**：`tools.c` 中 `detect_shells()`
 - **依赖**：无
-- [ ] 创建 `src/shell_detect.nim`
-- [ ] POSIX: `getEnv("SHELL")`
-- [ ] Windows: PATH 中查找 bash.exe / pwsh.exe / powershell.exe / cmd.exe + 额外路径
-- [ ] 创建 `tests/test_shell_detect.nim`
-- [ ] 更新 `tests/test_runner.nim`
+- [x] 创建 `src/shell_detect.nim`
+- [x] POSIX: `getEnv("SHELL")`
+- [x] Windows: PATH 中查找 bash.exe / pwsh.exe / powershell.exe / cmd.exe + 额外路径
+- [x] 创建 `tests/test_shell_detect.nim`
+- [x] 更新 `tests/test_runner.nim`
 
 ### 3.8 命令执行
 - **C 对应**：`tools.c` 中 `execute_command()`, `split_commands()`, `trim_whitespace()`, `CircularBuffer`

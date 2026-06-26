@@ -1,5 +1,16 @@
 # Changelog
 
+## Shell 检测模块
+
+### Added
+- `src/shell_detect.nim`：Shell 检测模块。无项目内依赖。公共类型：`ShellInfo`（name/path/found）。核心 proc `detectShells*(): seq[ShellInfo]`，POSIX 分支读取 `$SHELL` 环境变量并用 `extractFilename` 提取 basename，Windows 分支在 PATH 中搜索 `bash.exe`/`pwsh.exe`/`powershell.exe`/`cmd.exe`（`findExe`），bash 额外检查 5 个已知安装路径
+- `tests/test_shell_detect.nim`：6 个测试用例，2 个套件（basic detection / common shells），覆盖非空结果、名称非空、路径非空、found 标记、路径存在性、常见 shell 检测（bash/zsh/sh/fish）
+
+### Changed
+- `tests/test_runner.nim`：注册 `test_shell_detect` 测试模块
+
+- Affected files: `src/shell_detect.nim`, `tests/test_shell_detect.nim`, `tests/test_runner.nim`
+
 ## 代码格式化模块
 
 ### Added

@@ -11,3 +11,4 @@ import test_file_reader
 import test_file_writer
 import test_file_edit
 import test_formatter
+import test_shell_detect
