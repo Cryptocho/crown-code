@@ -1,5 +1,16 @@
 # Changelog
 
+## 命令执行模块
+
+### Added
+- `src/command_exec.nim`：命令执行模块。依赖 `shell_detect`（Shell 检测）。公共类型：`CommandError`（枚举，ceOk/ceApprovalDenied/ceExecutionFailed/ceTimeout）、`CommandResult`（stdout/stderr/exitCode/executionTime/abnormalExit/error）。公共常量：`MaxFullOutputSize`（1MB 输出截断）、`DefaultTimeoutMs`（300 秒超时）、`CircularBufferSize`（2000 槽）。辅助函数：`trimWhitespace`（两端空白去除）、`splitCommands`（按 `&&`/`||`/`&`/`|`/`;` 拆分子命令）、`requiresApproval`（审批检查存根，始终返回 `true`）。`CircularBuffer` 环形缓冲区（`initCircularBuffer`/`pushCircularBuffer`/`joinCircularBuffer`，线程安全锁定）。核心 `execCommand`（10 步流程：trim → splitCommands → 黑名单审批检查 → `detectShells` 获取 shell → `startProcess` 启动子进程（POSIX: `bash -l -c`，Windows: `cmd.exe /c`）→ 双线程流式读取 stdout/stderr → `waitForExit` 带超时 → 超时 `terminate`+`kill` → 拼接输出 → 执行时间统计）
+- `tests/test_command_exec.nim`：27 个测试用例，5 个套件（trimWhitespace / splitCommands / requiresApproval / CircularBuffer / execCommand），覆盖各种分隔符拆分、缓冲区溢出覆盖、echo 输出、exit code、stderr 捕获、空/空白命令、执行时间测量、黑名单审批检查、命令未找到处理
+
+### Changed
+- `tests/test_runner.nim`：注册 `test_command_exec` 测试模块
+
+- Affected files: `src/command_exec.nim`, `tests/test_command_exec.nim`, `tests/test_runner.nim`
+
 ## Shell 检测模块
 
 ### Added

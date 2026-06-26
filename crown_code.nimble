@@ -11,6 +11,8 @@ bin           = @["crown_code"]
 
 requires "nim >= 2.0.0"
 
+requires "notcurses#head"
+
 # Tasks
 
 task test, "Run all tests":

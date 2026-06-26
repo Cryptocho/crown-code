@@ -14,12 +14,22 @@ A vibe coding tui tool written in nim, similar to cline but with some additional
 │   ├── ignore_rules.nim          # .clineignore rule matching
 │   ├── pathutils.nim             # Path resolution and normalization
 │   ├── file_reader.nim           # File reading with line numbering + cache
+│   ├── file_writer.nim           # File writing + cache invalidation
+│   ├── file_edit.nim             # Line-level exact replace
+│   ├── formatter.nim             # Code formatting (tabs→spaces, trailing trim)
+│   ├── shell_detect.nim          # Shell detection ($SHELL / PATH)
+│   ├── command_exec.nim          # Process spawn, output capture, timeout
 │   ├── search.nim                # Regex search (std/re)
 │   ├── search_json.nim           # JSON search output formatting
 │   └── xdiff.nim                 # Unified diff engine (Myers O(ND))
 ├── tests/                        # Nim test files (.nim)
 │   ├── test_runner.nim           # Test entry point (imports all suites)
 │   ├── test_file_reader.nim      # File reader tests (15 cases)
+│   ├── test_file_writer.nim      # File writer tests (8 cases)
+│   ├── test_file_edit.nim        # File edit tests (15 cases)
+│   ├── test_formatter.nim        # Formatter tests (10 cases)
+│   ├── test_shell_detect.nim     # Shell detect tests (6 cases)
+│   ├── test_command_exec.nim     # Command exec tests (27 cases)
 │   ├── config.nims               # Test config (--path:src)
 │   ├── test_template.nim         # Bootstrap template test
 │   ├── test_context.nim          # Context tests (5 cases)
@@ -65,12 +75,12 @@ DO NOT use `nim c` command directly in project root — use `make` instead
 ### Development Process
 1. Propose a plan and wait for approval
 2. Implement the plan, if the plan is found to be unworkable at any time, you should stop and report
-3. Review uncommitted code for correctness, elegance, consistency, and absence of logic errors
+3. Use subagent to review uncommitted code for correctness, elegance, consistency, and absence of logic errors
 4. Update TODO.md (if exist)
 5. After review or upon user request, update CHANGELOG.md. Modifying CHANGELOG.md before review is prohibited
 6. Check whether AGENTS.md needs to be updated
 7. Ask the user if they want to write a commit message; if so, present an English commit message preview for confirmation before committing. Direct submission is prohibited
-8. After confirmation, commit **ALL** changes and push
+8. After confirmation, commit **ALL** changes and **push**
 > - Plans must include detailed steps and specifics, including steps in the development process
 > - Before creating a plan, you **MUST** spawn a subagent to review it for feasibility and completeness
 > - CHANGELOG and commit messages must not contain internal milestone numbers (e.g. "Phase 2.1")

@@ -145,17 +145,17 @@
 ### 3.8 命令执行
 - **C 对应**：`tools.c` 中 `execute_command()`, `split_commands()`, `trim_whitespace()`, `CircularBuffer`
 - **依赖**：3.7 Shell 检测
-- [ ] 创建 `src/command_exec.nim`
-- [ ] `execCommand(command: string, blacklist: openArray[string]): CommandResult`
-- [ ] 命令拆分（支持 `&&`, `||`, `|`, `;`, `&`）
-- [ ] 审批检查（黑名单匹配 + 用户确认 TODO）
-- [ ] 子进程启动 → `std/osproc.startProcess()`
-- [ ] stdout/stderr 流式捕获（环形缓冲区 `CircularBuffer` → `Deque[string]`）
-- [ ] Timeout（`DEFAULT_TIMEOUT_SECONDS = 300`）
-- [ ] 最大输出限制（`MAX_FULL_OUTPUT_SIZE = 1MB`）
-- [ ] 执行时间统计
-- [ ] 创建 `tests/test_command_exec.nim`
-- [ ] 更新 `tests/test_runner.nim`
+- [x] 创建 `src/command_exec.nim`
+- [x] `execCommand(command: string, blacklist: openArray[string]): CommandResult`
+- [x] 命令拆分（支持 `&&`, `||`, `|`, `;`, `&`）
+- [x] 审批检查（黑名单匹配 + 用户确认 TODO）
+- [x] 子进程启动 → `std/osproc.startProcess()`
+- [x] stdout/stderr 流式捕获（环形缓冲区 `CircularBuffer`）
+- [x] Timeout（`DEFAULT_TIMEOUT_SECONDS = 300`）
+- [x] 最大输出限制（`MAX_FULL_OUTPUT_SIZE = 1MB`）
+- [x] 执行时间统计
+- [x] 创建 `tests/test_command_exec.nim`
+- [x] 更新 `tests/test_runner.nim`
 
 ### 3.9 目录列表
 - **C 对应**：`tools.c` 中 `list_files()`
