@@ -21,7 +21,9 @@ A vibe coding tui tool written in nim, similar to cline but with some additional
 │   ├── command_exec.nim          # Process spawn, output capture, timeout
 │   ├── search.nim                # Regex search (std/re)
 │   ├── search_json.nim           # JSON search output formatting
-│   └── xdiff.nim                 # Unified diff engine (Myers O(ND))
+│   ├── xdiff.nim                 # Unified diff engine (Myers O(ND))
+│   └── mcp/                      # MCP client protocol stack
+│       └── jsonrpc.nim           # JSON-RPC 2.0 message builder/parser
 ├── tests/                        # Nim test files (.nim)
 │   ├── test_runner.nim           # Test entry point (imports all suites)
 │   ├── test_file_reader.nim      # File reader tests (15 cases)
@@ -37,7 +39,8 @@ A vibe coding tui tool written in nim, similar to cline but with some additional
 │   ├── test_pathutils.nim        # Path utils tests (14 cases)
 │   ├── test_diff.nim             # XDiff tests (19 cases)
 │   ├── test_search.nim           # Search tests (29 cases)
-│   └── test_search_json.nim      # JSON search output tests (25 cases)
+│   ├── test_search_json.nim      # JSON search output tests (25 cases)
+│   └── test_mcp_jsonrpc.nim      # JSON-RPC tests (14 cases)
 ├── build/                        # Build output directory
 │   ├── debug/                    # Debug binary
 │   ├── release/                  # Release binary

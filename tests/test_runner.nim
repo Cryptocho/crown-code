@@ -15,3 +15,4 @@ import test_shell_detect
 import test_command_exec
 import test_list_files
 import test_search_files
+import test_mcp_jsonrpc

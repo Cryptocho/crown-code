@@ -187,12 +187,12 @@
 
 ### 4.1 JSON-RPC 通信层
 - **依赖**：无（用 `std/json`）
-- [ ] 创建 `src/mcp/jsonrpc.nim`
-- [ ] `buildRequest(method, params: string): string`
-- [ ] `buildNotification(method, params: string): string`
-- [ ] `parseResponse(json: string): JsonNode`
-- [ ] 创建 `tests/test_mcp_jsonrpc.nim`
-- [ ] 更新 `tests/test_runner.nim`
+- [x] 创建 `src/mcp/jsonrpc.nim`
+- [x] `buildRequest(meth, params: JsonNode, id: int64): string`
+- [x] `buildNotification(meth, params: JsonNode): string`
+- [x] `parseResponse(jsonStr: string): JsonNode`（仅反序列化，不校验语义）
+- [x] 创建 `tests/test_mcp_jsonrpc.nim`（14 个用例）
+- [x] 更新 `tests/test_runner.nim`
 
 ### 4.2 stdio 传输
 - **C 对应**：`mcp.c` 中 `internal_io_spawn_child()`, `internal_io_read_line()`, `internal_io_write_line()`

@@ -1,5 +1,16 @@
 # Changelog
 
+## JSON-RPC 通信层模块
+
+### Added
+- `src/mcp/jsonrpc.nim`：JSON-RPC 2.0 通信层基础模块。依赖 `std/json`（无项目内依赖）。公共 API：`buildRequest`（构建请求字符串，含 `jsonrpc`/`method`/`params`/`id` 字段，`params` 为 `newJNull()` 时省略该字段）、`buildNotification`（构建通知字符串，无 `id` 字段，`params` 省略规则同上）、`parseResponse`（反序列化响应 JSON，仅做语法解析，不校验 `jsonrpc` 版本或 `id` 匹配）。所有构建函数使用 `%*` 宏类型安全构造 JSON
+- `tests/test_mcp_jsonrpc.nim`：14 个测试用例，3 个套件（buildRequest / buildNotification / parseResponse），覆盖正常参数、null params 省略、空 object/array 保留 params、method 特殊字符转义、valid result/error 响应、空对象/数组 JSON、空字符串/非法 JSON 异常
+
+### Changed
+- `tests/test_runner.nim`：注册 `test_mcp_jsonrpc` 测试模块
+
+- Affected files: `src/mcp/jsonrpc.nim`, `tests/test_mcp_jsonrpc.nim`, `tests/test_runner.nim`
+
 ## 文件内容搜索模块
 
 ### Added
