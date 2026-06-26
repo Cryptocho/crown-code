@@ -1,5 +1,5 @@
 import unittest
-import std/[strutils, os]
+import std/strutils
 import command_exec
 
 suite "command_exec: trimWhitespace":

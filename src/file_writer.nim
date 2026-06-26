@@ -1,4 +1,3 @@
-import std/os
 import pathutils
 import ignore_rules
 import file_reader

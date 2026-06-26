@@ -2,7 +2,6 @@ import unittest
 import std/os
 import std/strutils
 import file_edit
-import file_writer
 import ignore_rules
 
 suite "file_edit: error handling":

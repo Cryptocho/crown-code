@@ -13,3 +13,4 @@ import test_file_edit
 import test_formatter
 import test_shell_detect
 import test_command_exec
+import test_list_files

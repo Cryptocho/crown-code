@@ -1,5 +1,16 @@
 # Changelog
 
+## 目录列表模块
+
+### Added
+- `src/list_files.nim`：目录列表模块。依赖 `pathutils`（路径解析）和 `ignore_rules`（clineignore 检测）。公共类型：`ListFilesError`（枚举，Success/NullPath/DirNotFound/PermissionDenied/ReadFailed）、`ListFilesResult`（entries/count/didHitLimit/error/errorMessage）。内部 `cmpEntry` 排序比较器（目录优先，同组按字母序）。主入口 `listFiles`（10 步流程：参数验证 → clineignore 目录检查 → 路径解析 → `/` 和 `$HOME` 安全限制返回空结果 → `dirExists` 存在性检查 → `walkDir` 遍历（`relative=true`，跳过 `.`/`..`）→ 逐条目 clineignore 过滤 → 达到 `MAX_LIST_ENTRIES=200` 截断 → `sort` 排序 → 返回结果）。目录不可读时 `try/except CatchableError` 返回 `ReadFailed`
+- `tests/test_list_files.nim`：12 个测试用例，4 个套件（error handling / basic functionality / limit / ignore rules），覆盖空路径、不存在路径、根目录安全限制、家目录安全限制、空目录、混合文件/目录列表、目录优先排序、字母序、隐藏文件、特殊字符文件名、200 条目截断、clineignore 文件过滤、clineignore 目录阻止
+
+### Changed
+- `tests/test_runner.nim`：注册 `test_list_files` 测试模块
+
+- Affected files: `src/list_files.nim`, `tests/test_list_files.nim`, `tests/test_runner.nim`
+
 ## 命令执行模块
 
 ### Added

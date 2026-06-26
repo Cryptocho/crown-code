@@ -1,9 +1,7 @@
 import unittest
 import std/os
-import std/times
 import std/strutils
 import file_reader
-import ignore_rules
 
 suite "file_reader: error handling":
   test "null_path returns NullPath error":

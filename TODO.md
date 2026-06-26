@@ -160,14 +160,14 @@
 ### 3.9 目录列表
 - **C 对应**：`tools.c` 中 `list_files()`
 - **依赖**：3.1 路径, 3.2 ignore
-- [ ] 创建 `src/list_files.nim`
-- [ ] `listFiles(path: string): ListFilesResult`
-- [ ] 目录遍历 → `os.walkDir()`
-- [ ] `.` / `..` 过滤
-- [ ] 排序：目录优先 → 字母序
-- [ ] 限制：`MAX_LIST_ENTRIES = 200`
-- [ ] 创建 `tests/test_list_files.nim`
-- [ ] 更新 `tests/test_runner.nim`
+- [x] 创建 `src/list_files.nim`
+- [x] `listFiles(path: string): ListFilesResult`
+- [x] 目录遍历 → `os.walkDir()`
+- [x] `.` / `..` 过滤
+- [x] 排序：目录优先 → 字母序
+- [x] 限制：`MAX_LIST_ENTRIES = 200`
+- [x] 创建 `tests/test_list_files.nim`
+- [x] 更新 `tests/test_runner.nim`
 
 ### 3.10 文件内容搜索
 - **C 对应**：`tools.c` 中 `search_files()`, `search_dir()`, `search_file()`
