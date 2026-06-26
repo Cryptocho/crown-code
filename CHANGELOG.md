@@ -1,5 +1,16 @@
 # Changelog
 
+## stdio 传输层模块
+
+### Added
+- `src/mcp/transport_stdio.nim`：MCP stdio 传输层。手动 `fork()` + `pipe()` × 3 + `dup2()` + `execlp()` 管理子进程（不使用 `osproc.startProcess`，确保 fd 完全所有权）。核心 API：`startStdioTransport(command, args)`（返回 `StdioTransport` ref object，包含 readFd/writeFd/stderrFd/childPid/stderrBuf），`readJsonLine(t, timeoutMs)`（select 轮询 + monotonic deadline 实现超时，逐字节读取跳过 `\r`，遇 `\n` 返回，超时返回 `teTimeout`，EOF 返回 `teEof`），`writeJsonLine(t, line, timeoutMs)`（追加 `\n` 后 write，EINTR 重试），`close(t)`（SIGTERM → WNOHANG 循环 5 秒 → SIGKILL → waitpid 回收 + 关闭所有 fd），`getStderr(t)`（返回环形缓冲区中缓存的 stderr 内容）。公共常量：`MCP_LINE_BUF_SIZE`（1MB）、`DEFAULT_LINE_TIMEOUT_MS`（30 秒）
+- `tests/test_mcp_stdio.nim`：8 个测试用例，覆盖空命令错误、进程启动（true）、超时读取、nil 关闭、资源清理、进程强制终止（sleep 10）
+
+### Changed
+- `tests/test_runner.nim`：注册 `test_mcp_stdio` 测试模块
+
+- Affected files: `src/mcp/transport_stdio.nim`, `tests/test_mcp_stdio.nim`, `tests/test_runner.nim`
+
 ## JSON-RPC 通信层模块
 
 ### Added

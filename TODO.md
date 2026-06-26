@@ -197,13 +197,13 @@
 ### 4.2 stdio 传输
 - **C 对应**：`mcp.c` 中 `internal_io_spawn_child()`, `internal_io_read_line()`, `internal_io_write_line()`
 - **依赖**：4.1 JSON-RPC
-- [ ] 创建 `src/mcp/transport_stdio.nim`
-- [ ] 子进程启动：`osproc.startProcess(command, args)`
-- [ ] 行读取/写入（JSON-RPC newline-delimited）
-- [ ] stderr 转发
-- [ ] 进程关闭（SIGTERM → 等 5s → SIGKILL）
-- [ ] 创建 `tests/test_mcp_stdio.nim`
-- [ ] 更新 `tests/test_runner.nim`
+- [x] 创建 `src/mcp/transport_stdio.nim`
+- [x] 子进程启动：手动 `fork()` + `pipe()` × 3 + `dup2()` + `execlp()`
+- [x] 行读取/写入（JSON-RPC newline-delimited，select 轮询 + timeout）
+- [x] stderr 转发（独立线程 + 环形缓冲区）
+- [x] 进程关闭（SIGTERM → WNOHANG 5s → SIGKILL → waitpid）
+- [x] 创建 `tests/test_mcp_stdio.nim`
+- [x] 更新 `tests/test_runner.nim`
 
 ### 4.3 HTTP/Streamable 传输
 - **C 对应**：`mcp.c` 中 `internal_tls_connect()`, `internal_http_post()`

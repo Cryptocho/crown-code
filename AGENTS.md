@@ -23,7 +23,8 @@ A vibe coding tui tool written in nim, similar to cline but with some additional
 │   ├── search_json.nim           # JSON search output formatting
 │   ├── xdiff.nim                 # Unified diff engine (Myers O(ND))
 │   └── mcp/                      # MCP client protocol stack
-│       └── jsonrpc.nim           # JSON-RPC 2.0 message builder/parser
+│       ├── jsonrpc.nim           # JSON-RPC 2.0 message builder/parser
+│       └── transport_stdio.nim   # Stdio transport (fork/exec/pipe + select I/O)
 ├── tests/                        # Nim test files (.nim)
 │   ├── test_runner.nim           # Test entry point (imports all suites)
 │   ├── test_file_reader.nim      # File reader tests (15 cases)
@@ -83,7 +84,7 @@ DO NOT use `nim c` command directly in project root — use `make` instead
 5. After review or upon user request, update CHANGELOG.md. Modifying CHANGELOG.md before review is prohibited
 6. Check whether AGENTS.md needs to be updated
 7. Ask the user if they want to write a commit message; if so, present an English commit message preview for confirmation before committing. Direct submission is prohibited
-8. After confirmation, commit **ALL** changes and **push**
+8. After confirmation, commit **ALL** changes (git add -A) and **push**
 > - Plans must include detailed steps and specifics, including steps in the development process
 > - Before creating a plan, you **MUST** spawn a subagent to review it for feasibility and completeness
 > - CHANGELOG and commit messages must not contain internal milestone numbers (e.g. "Phase 2.1")
