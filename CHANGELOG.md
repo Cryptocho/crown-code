@@ -1,5 +1,16 @@
 # Changelog
 
+## 文件内容搜索模块
+
+### Added
+- `src/search_files.nim`：文件内容正则搜索模块。依赖 `search`（正则搜索）、`glob`（文件名过滤）、`ignore_rules`（clineignore 检测）、`pathutils`（路径处理）。公共类型：`SearchFilesError`（枚举，sfeSuccess/sfeNullParam/sfeDirNotFound/sfeRegexError）、`SearchFilesResult`（results/matchCount/error/errorMessage）。公共常量：`MAX_SEARCH_DEPTH`（10）、`MAX_SEARCH_OUTPUT`（256KB）、`MAX_CONTEXT_LINES`（1）。核心流程：`searchFiles`（参数校验 → 正则编译 → `absolutePath` 标准化根路径 → 调用 `searchDir` 递归搜索）。内部 proc `searchDir`（深度 ≥ MAX_SEARCH_DEPTH 返回 → `walkDir` 遍历 → glob 过滤条目名 → clineignore 检查 → 目录递归 / 文件调用 `searchFile`）。内部 proc `searchFile`（`readFile` 读取 → `matchAll` 获取所有匹配 → 循环输出：`{rel_path}\n│----\n` 头部 → 前一行上下文（matchLine > 1 时 `getLine(matchLine-1)`）→ `│{match_line}\n` → 后一行上下文（`getLine(matchLine+1)`）→ `│----\n` 尾部 → 截断检查追加 `[Results truncated...]`）
+- `tests/test_search_files.nim`：19 个测试用例，6 个套件（error handling / directory based tests / depth limiting / truncation / output format），覆盖空参数/nullParam、目录不存在/dirNotFound、无效正则/regexError、单文件单/多匹配、跨文件匹配、glob 文件名过滤、上下文行显示（前后各 1 行 + 边界限幅）、空文件、clineignore 过滤、深度限制（12 层嵌套，depth=0→10 共 11 层可达，第 12 层不可达）、256KB 输出截断（含 `[Results truncated...]` 标记）、输出格式（`│` 前缀 + `│----\n` 分隔符）
+
+### Changed
+- `tests/test_runner.nim`：注册 `test_search_files` 测试模块
+
+- Affected files: `src/search_files.nim`, `tests/test_search_files.nim`, `tests/test_runner.nim`
+
 ## 目录列表模块
 
 ### Added

@@ -172,14 +172,14 @@
 ### 3.10 文件内容搜索
 - **C 对应**：`tools.c` 中 `search_files()`, `search_dir()`, `search_file()`
 - **依赖**：2.1 Search, 1.2 Glob, 3.1 路径, 3.2 ignore
-- [ ] 创建 `src/search_files.nim`
-- [ ] `searchFiles(directory, regex, filePattern: string): SearchFilesResult`
-- [ ] 递归目录搜索（深度限制 `MAX_SEARCH_DEPTH = 10`）
-- [ ] clineignore 检查
-- [ ] 匹配结果格式化（路径标题 + 上下文行）
-- [ ] 输出截断（`MAX_SEARCH_OUTPUT = 256KB`）
-- [ ] 创建 `tests/test_search_files.nim`
-- [ ] 更新 `tests/test_runner.nim`
+- [x] 创建 `src/search_files.nim`
+- [x] `searchFiles(directory, regex, filePattern: string): SearchFilesResult`
+- [x] 递归目录搜索（深度限制 `MAX_SEARCH_DEPTH = 10`）
+- [x] clineignore 检查
+- [x] 匹配结果格式化（路径标题 + 上下文行）
+- [x] 输出截断（`MAX_SEARCH_OUTPUT = 256KB`）
+- [x] 创建 `tests/test_search_files.nim`
+- [x] 更新 `tests/test_runner.nim`
 
 ---
 
@@ -255,6 +255,10 @@
 - [ ] 实现主流程逻辑
 - [ ] `make debug` 构建验证
 - [ ] `make test` 全部测试通过
+
+---
+
+## Phase 6: 检查测试代码和C测试代码功能是否一致
 
 ---
 
