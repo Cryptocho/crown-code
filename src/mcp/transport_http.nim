@@ -1,8 +1,10 @@
-import std/[net, strutils, tables, uri, posix]
+import std/[net, strutils, tables, uri, posix, monotimes, times]
+import mcp/sse
 
 const
   DEFAULT_HTTP_TIMEOUT_MS* = 30_000
   MAX_RESPONSE_SIZE* = 10 * 1024 * 1024
+  SSE_READ_TIMEOUT_MS = 120_000
   HTTP_PORT = 80
   HTTPS_PORT = 443
 
@@ -12,6 +14,7 @@ type
     headers*: TableRef[string, string]
     body*: string
     error*: string
+    events*: seq[SseEvent]
 
   HttpTransport* = ref object
     host: string
@@ -179,6 +182,28 @@ proc waitReadable(socket: Socket, timeoutMs: int): bool =
   if selRet > 0: return true
   false
 
+proc readSseResponse(socket: Socket, timeoutMs: int): seq[SseEvent] =
+  result = @[]
+  var parser = newSseParser()
+  let deadline = getMonoTime() + initDuration(milliseconds = timeoutMs)
+  var buf: array[4096, char]
+  while true:
+    let remMs = (deadline - getMonoTime()).inMilliseconds
+    if remMs <= 0:
+      for evt in parser.flush(): result.add(evt)
+      break
+    if not waitReadable(socket, min(1000, remMs).int):
+      for evt in parser.flush(): result.add(evt)
+      break
+    let n = recv(socket, addr(buf), sizeof(buf))
+    if n <= 0:
+      for evt in parser.flush(): result.add(evt)
+      break
+    var chunk = newString(n)
+    copyMem(chunk.cstring, addr(buf), n)
+    for evt in parser.feed(chunk):
+      result.add(evt)
+
 proc postJson*(t: HttpTransport, jsonBody: string): HttpResponse =
   if t.isNil or not t.connected:
     return HttpResponse(statusCode: 0, error: "not connected",
@@ -216,9 +241,16 @@ proc postJson*(t: HttpTransport, jsonBody: string): HttpResponse =
       let key = headerLine[0 ..< colonPos].strip().toLowerAscii()
       let value = headerLine[colonPos + 1 .. ^1].strip()
       result.headers[key] = value
+  let contentType = result.headers.getOrDefault("content-type", "")
   let transferEncoding = result.headers.getOrDefault("transfer-encoding", "")
   let contentLengthStr = result.headers.getOrDefault("content-length", "")
-  if transferEncoding.find("chunked") >= 0:
+  if contentType.startsWith("text/event-stream"):
+    if transferEncoding.find("chunked") >= 0:
+      result.error = "chunked SSE not supported"
+      return
+    result.events = readSseResponse(t.socket, SSE_READ_TIMEOUT_MS)
+    return result
+  elif transferEncoding.find("chunked") >= 0:
     result.body = readChunkedBody(t.socket)
   elif contentLengthStr.len > 0:
     var clen = 0

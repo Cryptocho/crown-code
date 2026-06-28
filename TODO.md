@@ -216,7 +216,7 @@
 - [x] Bearer token 认证
 - [x] 创建 `tests/test_mcp_http.nim`
 - [x] 更新 `tests/test_runner.nim`
-- [ ] SSE 流式响应（留待后续）
+- [x] SSE 流式响应
 
 ### 4.4 MCP 客户端核心
 - **C 对应**：`mcp.c` 中 `mcp_client_t` 及对外 API

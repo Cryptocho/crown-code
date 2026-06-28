@@ -24,7 +24,9 @@ A vibe coding tui tool written in nim, similar to cline but with some additional
 │   ├── xdiff.nim                 # Unified diff engine (Myers O(ND))
 │   └── mcp/                      # MCP client protocol stack
 │       ├── jsonrpc.nim           # JSON-RPC 2.0 message builder/parser
-│       └── transport_stdio.nim   # Stdio transport (fork/exec/pipe + select I/O)
+│       ├── transport_stdio.nim   # Stdio transport (fork/exec/pipe + select I/O)
+│       ├── transport_http.nim    # HTTP/SSE transport (TLS, chunked, event-stream)
+│       └── sse.nim               # W3C Server-Sent Events parser
 ├── tests/                        # Nim test files (.nim)
 │   ├── test_runner.nim           # Test entry point (imports all suites)
 │   ├── test_file_reader.nim      # File reader tests (15 cases)
@@ -41,11 +43,15 @@ A vibe coding tui tool written in nim, similar to cline but with some additional
 │   ├── test_diff.nim             # XDiff tests (19 cases)
 │   ├── test_search.nim           # Search tests (29 cases)
 │   ├── test_search_json.nim      # JSON search output tests (25 cases)
-│   └── test_mcp_jsonrpc.nim      # JSON-RPC tests (14 cases)
+│   ├── test_mcp_jsonrpc.nim      # JSON-RPC tests (14 cases)
+│   ├── test_mcp_stdio.nim        # Stdio transport tests (7 cases)
+│   ├── test_mcp_http.nim         # HTTP transport tests
+│   └── test_mcp_sse.nim          # SSE parser tests (33 cases)
 ├── build/                        # Build output directory
 │   ├── debug/                    # Debug binary
 │   ├── release/                  # Release binary
 │   └── test/                     # Test runner binary
+├── ratatui-ffi/                  # Rust ratatui binding for future TUI (FFI submodule)
 ├── temp/                         # C code migration reference (historical)
 ├── crown_code.nimble             # Nimble package file (build, test, deps)
 ├── config.nims                   # Project-level Nim config (mm:orc, threads:on)

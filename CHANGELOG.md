@@ -1,5 +1,18 @@
 # Changelog
 
+## SSE 流式响应解析模块
+
+### Added
+- `src/mcp/sse.nim`：W3C Server-Sent Events 协议解析器。公共类型：`SseEvent`（event/data/id）、`SseParser`（ref object with ref count）。公共 API：`newSseParser`、`feed(chunk)`（增量解析，返回 `seq[SseEvent]`）、`flush`（流结束强制输出）、`reset`、`lastEventId`（跨事件持久化）、`reconnectionTime`。协议覆盖：`\n`/`\r\n`/`\r` 三种换行符归一化、BOM 剥离、注释(`:`)忽略、`event`/`data`/`id`/`retry` 字段识别（大小写不敏感，字段冒号后可选空格）、多行 data `\n` 拼接、`id` 含 `\0` 忽略、`retry` 非正整数忽略。依赖 `std/strutils`（仅标准库，无项目内依赖）
+- `tests/test_mcp_sse.nim`：33 个测试用例，3 个套件（完整文本解析 18 个 / 流式解析 10 个 / HTTP 集成 5 个），覆盖单事件、多事件、字段类型、多行 data、空白 data 行、注释、BOM、无 data 行不触发、null id、无效 retry、未知字段忽略、CRLF/CR 换行符、trailing space retry、冒号事件名、前置空格 data、分块流式解析（跨 chunk 和跨行切分）、flush 残留事件、reset 重置、lastEventId 跨事件持久化、parseHttpResponse 集成解析 SSE HTTP 响应体
+
+### Changed
+- `src/mcp/transport_http.nim`：`HttpResponse` 新增 `events*: seq[SseEvent]` 字段（零值 `@[]`，向下兼容）；新增 `SSE_READ_TIMEOUT_MS` 常量（120s）；`postJson` 内集成分支：检测 `Content-Type: text/event-stream` 后调用 `readSseResponse`（`waitReadable` + `recv` 字节块 + `SseParser.feed`，非 `recvLine`），chunked SSE 返回错误；新增 `import mcp/sse`、`std/monotimes`、`std/times`
+- `tests/test_runner.nim`：注册 `test_mcp_sse` 测试模块
+- `TODO.md`：Phase 4.3 SSE 流式响应 标记完成
+
+- Affected files: `src/mcp/sse.nim`, `src/mcp/transport_http.nim`, `tests/test_mcp_sse.nim`, `tests/test_runner.nim`, `TODO.md`
+
 ## MCP HTTP 传输层模块
 
 ### Added
