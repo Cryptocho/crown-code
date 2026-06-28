@@ -1,5 +1,18 @@
 # Changelog
 
+## MCP HTTP 传输层模块
+
+### Added
+- `src/mcp/transport_http.nim`：MCP HTTP/Streamable 传输层基础。依赖 `std/net`、`std/strutils`、`std/tables`、`std/uri`、`std/posix`。公共类型：`HttpTransport`（ref object，含 socket/host/port/tls/basePath/bearerToken/connected/lastError）、`HttpResponse`（statusCode/headers/body/error）。公共 API：`newHttpTransport`（URL 解析，默认端口 http:80 https:443）、`connect`（TCP → TLS wrapConnectedSocket 握手）、`close`（nil-safe socket 关闭）、`postJson`（构建 HTTP/1.1 POST 请求，header 大小写不敏感查找，Transfer-Encoding 优先 Content-Length）、`isConnected`。内部实现：`buildHttpRequest`、`parseHttpResponse`（状态行解析含无 reason phrase 场景，Content-Type charset 前缀匹配）、`readChunkedBody`（chunk-ext 剥离，hex 大小写混合解析，trailer headers 处理，字节精确读取）、`readFixedBody`（recv 循环读至满 Content-Length 字节）。常量：`DEFAULT_HTTP_TIMEOUT_MS`（30s）、`MAX_RESPONSE_SIZE`（10MB）
+- `tests/test_mcp_http.nim`：6 个套件约 28 个测试用例，覆盖 URL 解析、HTTP 请求构建、响应解析（含无 reason phrase/charset/大小写混合 header）、header 大小写不敏感、chunked 解码（Transfer-Encoding 优先规则）、连接生命周期
+- `TODO.md`：Phase 4.3 完成，追加 SSE 流式响应 TODO
+- `config.nims`：添加 `switch("define", "ssl")` 启用 OpenSSL 支持
+
+### Changed
+- `tests/test_runner.nim`：注册 `test_mcp_http` 测试模块
+
+- Affected files: `src/mcp/transport_http.nim`, `tests/test_mcp_http.nim`, `tests/test_runner.nim`, `TODO.md`, `config.nims`
+
 ## stdio 传输层模块
 
 ### Added

@@ -17,3 +17,4 @@ import test_list_files
 import test_search_files
 import test_mcp_jsonrpc
 import test_mcp_stdio
+import test_mcp_http

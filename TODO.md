@@ -208,14 +208,15 @@
 ### 4.3 HTTP/Streamable 传输
 - **C 对应**：`mcp.c` 中 `internal_tls_connect()`, `internal_http_post()`
 - **依赖**：4.1 JSON-RPC, `std/net`, `std/httpclient`
-- [ ] 创建 `src/mcp/transport_http.nim`
-- [ ] DNS 解析 → `net.getAddrInfo()`
-- [ ] TLS socket 连接 → `net.newContext()` + `wrapSocket()`
-- [ ] HTTP POST 请求构建 / 响应解析
-- [ ] Chunked transfer encoding
-- [ ] Bearer token 认证 + 401 处理
-- [ ] 创建 `tests/test_mcp_http.nim`
-- [ ] 更新 `tests/test_runner.nim`
+- [x] 创建 `src/mcp/transport_http.nim`
+- [x] DNS 解析 → TCP 连接
+- [x] TLS socket 连接 → `net.newContext()` + `wrapConnectedSocket()`
+- [x] HTTP POST 请求构建 / 响应解析
+- [x] Chunked transfer encoding
+- [x] Bearer token 认证
+- [x] 创建 `tests/test_mcp_http.nim`
+- [x] 更新 `tests/test_runner.nim`
+- [ ] SSE 流式响应（留待后续）
 
 ### 4.4 MCP 客户端核心
 - **C 对应**：`mcp.c` 中 `mcp_client_t` 及对外 API

@@ -85,7 +85,7 @@ DO NOT use `nim c` command directly in project root — use `make` instead
 6. Check whether AGENTS.md needs to be updated
 7. Ask the user if they want to write a commit message; if so, present an English commit message preview for confirmation before committing. Direct submission is prohibited
 8. After confirmation, commit **ALL** changes (git add -A) and **push**
-> - Plans must include detailed steps and specifics, including steps in the development process
+> - Plans must include detailed steps and specifics, including steps in the development process(from 3 to 8 all written in plan)
 > - Before creating a plan, you **MUST** spawn a subagent to review it for feasibility and completeness
 > - CHANGELOG and commit messages must not contain internal milestone numbers (e.g. "Phase 2.1")
 > - Commit message only lists project code files (`src/`, `tests/`, `config.nims`, etc.), excluding management files like `TODO.md`, `AGENTS.md`, `CHANGELOG.md`

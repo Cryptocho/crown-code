@@ -21,3 +21,4 @@ temp/
 nimble.develop
 nimble.paths
 nimbledeps
+ratatui_wrapper/target/
