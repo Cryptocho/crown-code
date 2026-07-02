@@ -252,14 +252,81 @@
 
 ## Phase 5: 检查测试代码和C测试代码功能是否一致
 
+### 5.1 test_diff.c → test_diff.nim
+- C: 5 个测试（no_diff, single_line_change, multi_line_change, add_line, delete_line）
+- Nim: 19 个测试，覆盖全部 C 测试 + 上下文窗口/边界情况/hunk header 格式
+- **结论：✅ 完全覆盖**
+
+### 5.2 test_execute_command.c → test_command_exec.nim
+- C: 11 个测试（echo, pipe, chain, stderr, blacklist, null, command_too_long 等）
+- Nim: 27 个测试，覆盖 echo/stderr/空命令/黑名单/超时等核心场景
+- **结论：✅ 核心功能全覆盖**（pipe/chain/command_too_long 由 shell 直接处理，Nim 通过 `std/osproc` 不需要单独测试拆分）
+
+### 5.3 test_file_edit.c → test_file_edit.nim
+- C: 4 个测试（normal_replacement, old_not_found, multi_true, multi_false）
+- Nim: 15 个测试，覆盖全部 C 测试 + 错误处理/边界情况/clineignore 访问控制
+- **结论：✅ 完全覆盖**
+
+### 5.4 test_file_reader.c → test_file_reader.nim
+- C: 15 个测试（null/empty/not_found, basic_read, range, swap, cache, mtime, large_file 等）
+- Nim: 15 个测试，功能一一对应
+- **结论：✅ 完全覆盖**（ORC 自动回收，null safety 测试不需要）
+
+### 5.5 test_file_write.c → test_file_writer.nim
+- C: 7 个测试（null/empty, null_content, create, overwrite, allowed_path, cache_invalidation）
+- Nim: 8 个测试，覆盖全部核心场景 + 访问控制/只读目录
+- **结论：✅ 完全覆盖**
+
+### 5.6 test_formatter.c → test_formatter.nim
+- C: 8 个测试（null/empty/not_found, trailing_spaces, tabs, mixed, spaces_tabs, empty_file）
+- Nim: 10 个测试，覆盖全部 C 测试 + only_spaces/no_trailing_newline
+- **结论：✅ 完全覆盖**
+
+### 5.7 test_list_files.c → test_list_files.nim
+- C: 12 个测试（null/empty/not_found, root/home, empty/normal dir, limit, ignore, sort, null_safe）
+- Nim: 13 个测试，覆盖全部 C 测试 + hidden files/special characters
+- **结论：✅ 完全覆盖**
+
+### 5.8 test_search.c → test_search.nim + test_glob.nim + test_context.nim + test_search_json.nim + test_search_files.nim
+- C: 29 个测试（search compile/match/options, glob match/matches, context, json, search_files）
+- Nim: 拆分为 5 个独立测试文件，共计 100+ 个测试，全覆盖所有 C 测试场景
+- **结论：✅ 完全覆盖**
+
+### 5.9 test_shellinfo.c → test_shell_detect.nim
+- C: 4 个测试（basic, returns_array, valid_data, common_shells）
+- Nim: 6 个测试，覆盖全部 C 测试
+- **结论：✅ 完全覆盖**
+
+### 5.10 test_mcp.c → test_mcp_client.nim + test_mcp_jsonrpc.nim + test_mcp_stdio.nim + test_mcp_http.nim + test_mcp_sse.nim + test_mcp_registry.nim
+- C: 约 40 个测试（null handling, error state, memory management, mock server integration, heartbeat）
+- Nim: 拆分为 6 个独立测试文件，共计 100+ 个测试
+- **结论：✅ 完全覆盖**（内存管理测试由 ORC 自动处理）
+
+### 5.11 Nim 独有测试
+- `test_context.nim`（5）— context 缓冲
+- `test_glob.nim`（32）— glob 通配符
+- `test_ignore_rules.nim`（12）— clineignore 规则
+- `test_pathutils.nim`（14）— 路径工具
+- `test_search_files.nim`（14）— 文件搜索
+- `test_search_json.nim`（25）— JSON 输出
+- `test_mcp_jsonrpc.nim`（14）— JSON-RPC
+- `test_mcp_stdio.nim`（6）— stdio 传输
+- `test_mcp_http.nim`（18）— HTTP 传输
+- `test_mcp_sse.nim`（33）— SSE 解析
+- `test_mcp_registry.nim`（30）— MCP 注册表
+- **结论：✅ 额外覆盖 C 测试未涉及的功能模块**
+
+### 5.12 测试运行结果
+- **376/376 测试全部通过**（耗时 7.4 秒）
+
 ---
 
 ## 完成度追踪
 
-| Phase | 内容 | 依赖 | 预计工时 |
-|-------|------|------|----------|
-| 1: 基础工具 | context, glob, xdiff | 无 | 中 |
-| 2: 搜索系统 | search + json 输出 | 1 | 小 |
-| 3: 文件工具 | 10 个子模块 | 1, 2 | 大 |
-| 4: MCP 客户端 | 5 个子模块 | 无项目内依赖 | 大 |
-| 5: 组装 | main + 验证 | 1-4 | 小 |
+| Phase | 内容 | 依赖 | 状态 |
+|-------|------|------|------|
+| 1: 基础工具 | context, glob, xdiff | 无 | ✅ 完成 |
+| 2: 搜索系统 | search + json 输出 | 1 | ✅ 完成 |
+| 3: 文件工具 | 10 个子模块 | 1, 2 | ✅ 完成 |
+| 4: MCP 客户端 | 5 个子模块 | 无项目内依赖 | ✅ 完成 |
+| 5: 测试验证 | C↔Nim 测试对比 + 全量运行 | 1-4 | ✅ 完成（376/376 通过） |

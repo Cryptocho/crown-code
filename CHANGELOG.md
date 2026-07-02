@@ -144,7 +144,7 @@
 ## 文件写入模块
 
 ### Added
-- `src/file_writer.nim`：文件写入与缓存失效模块。依赖 `pathutils`（路径解析）、`ignore_rules`（clineignore 检测）和 `file_reader`（`cacheInvalidate`）。公共类型：`FileWriterError`（枚举，Success/NullPath/FileNotFound/PermissionDenied/WriteFailed）、`FileWriterResult`（error/errorMessage）。主入口 `writeFileContent`（6 步流程：参数验证 → clineignore → 路径解析 → 文件写入 → 缓存失效 → 返回成功）。`writeFileContent` 使用 `content: string = ""` 默认参数，对应 C 的 NULL content 处理
+- `src/file_writer.nim`：文件写入与缓存失效模块。依赖 `pathutils`（路径解析）、`ignore_rules`（clineignore 检测）和 `file_reader`（`cacheInvalidate`）。公共类型：`FileWriterError`（枚举，Success/NullPath/FileNotFound/PermissionDenied/WriteFailed）、`FileWriterResult`（error/errorMessage）。主入口 `writeFileContent`（6 步流程：参数验证 → clineignore → 路径解析 → 文件写入 → 缓存失效 → 返回成功）。`writeFileContent` 使用 `content: string = ""` 默认参数
 - `tests/test_file_writer.nim`：8 个测试用例，5 个套件（error handling / basic functionality / caching / access control / write failure），覆盖空路径、文件写入、空内容写入、缓存失效验证、clineignore 拦截、不存在目录写入、只读目录写入、重复写入缓存行为
 
 ### Changed
@@ -163,7 +163,7 @@
 ## clineignore 忽略规则模块
 
 ### Added
-- `src/ignore_rules.nim`：导入 `pathutils` 和 `glob`，依赖 3.1 路径解析。导出 3 个公共 API：`loadIgnoreFile`（读取 `.clineignore` 文件，跳过空行/`#` 注释，去除尾部空白）、`resetIgnoreRules`（测试用重置）、`checkIgnorePath`（主入口：绝对路径转相对 → `fnmatchPathname` 匹配 → 无 `/` 的 pattern 加 `*/` 前缀 → 全局规则 > 项目规则）。采用全局懒初始化状态（`initIgnoreRules`），与 C 代码一致
+- `src/ignore_rules.nim`：导入 `pathutils` 和 `glob`，依赖 3.1 路径解析。导出 3 个公共 API：`loadIgnoreFile`（读取 `.clineignore` 文件，跳过空行/`#` 注释，去除尾部空白）、`resetIgnoreRules`（测试用重置）、`checkIgnorePath`（主入口：绝对路径转相对 → `fnmatchPathname` 匹配 → 无 `/` 的 pattern 加 `*/` 前缀 → 全局规则 > 项目规则）。采用全局懒初始化状态（`initIgnoreRules`）
 - `tests/test_ignore_rules.nim`：12 个测试用例，2 个套件（loadIgnoreFile / checkIgnorePath），覆盖非存在文件、注释跳过、尾部空白去除、空行跳过、简单 glob 匹配、`*/` 前缀子目录匹配（一级）、含 `/` pattern 精确路径匹配、`!` 否定规则、空路径安全、绝对路径转相对路径
 - `src/glob.nim` 新增 `fnmatchPathname`（FNM_PATHNAME 语义：`*`/`?`/`[...]` 不匹配 `/`，`*` 回溯不跨越路径分隔符）和 `matchGlobPathname`（基于 `fnmatchPathname`）
 - `tests/test_glob.nim` 新增 fnmatchPathname 测试套件（10 个测试用例），覆盖 star 不匹配 `/`、`*/` 前缀单级子目录、`?` 不匹配 `/`、段内 `*` 匹配、字符类不匹配 `/`、否定、精确路径、尾部 `*`、空 pattern、`*` 匹配空字符串
@@ -198,7 +198,7 @@
 ## Search 正则搜索模块
 
 ### Added
-- `src/search.nim`：使用 `std/re`（PCRE 封装）替代 C 的 PCRE2 FFI，导出 5 个公共 API：`newSearch`（编译正则，支持 `soCaseInsensitive`/`soMultiLine`/`soDotAll` 选项）、`matchFirst`（单次匹配，返回 `Option[Match]`）、`matchAll`（全部匹配，返回 `seq[Match]`）、`calcLineNumber`（偏移量 → 1-based 行号）、`getLine`（行号 → 行内容）
+- `src/search.nim`：使用 `std/re`（PCRE 封装），导出 5 个公共 API：`newSearch`（编译正则，支持 `soCaseInsensitive`/`soMultiLine`/`soDotAll` 选项）、`matchFirst`（单次匹配，返回 `Option[Match]`）、`matchAll`（全部匹配，返回 `seq[Match]`）、`calcLineNumber`（偏移量 → 1-based 行号）、`getLine`（行号 → 行内容）
 - `tests/test_search.nim`：29 个测试用例，7 个套件（newSearch / matchFirst / matchAll / calcLineNumber / getLine / options），覆盖无效正则、偏移匹配、跨行匹配、选项标志、边界情况
 
 ### Changed
