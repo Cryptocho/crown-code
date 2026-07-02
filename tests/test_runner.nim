@@ -1,3 +1,4 @@
+{.push warning[UnusedImport]: off.}
 import unittest
 import test_template
 import test_context
@@ -21,3 +22,7 @@ import test_mcp_http
 import test_mcp_sse
 import test_mcp_client
 import test_mcp_registry
+import test_api_types
+import test_openai
+import test_openai_streaming
+{.pop.}

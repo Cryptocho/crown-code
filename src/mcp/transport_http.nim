@@ -1,4 +1,4 @@
-import std/[net, strutils, tables, uri, posix, monotimes, times]
+import std/[net, strutils, tables, uri, posix]
 import mcp/sse
 
 const
@@ -7,6 +7,8 @@ const
   SSE_READ_TIMEOUT_MS = 120_000
   HTTP_PORT = 80
   HTTPS_PORT = 443
+  SO_RCVTIMEO = 20
+  SOL_SOCKET = 1
 
 type
   HttpResponse* = object
@@ -145,11 +147,18 @@ proc close*(t: HttpTransport) =
     discard
   t.connected = false
 
+proc setSocketTimeout(socket: Socket, timeoutMs: int) =
+  var tv: Timeval
+  tv.tv_sec = cast[posix.Time](clong(timeoutMs div 1000))
+  tv.tv_usec = cast[clong]((timeoutMs mod 1000) * 1000)
+  discard posix.setsockopt(socket.getFd(), cint(SOL_SOCKET), cint(SO_RCVTIMEO),
+                           cast[pointer](addr(tv)), cuint(sizeof(tv)))
+
 proc connect*(t: HttpTransport): bool =
   if t.isNil or t.connected: return t.connected
   var s: Socket = nil
   try:
-    s = newSocket(Domain.AF_UNSPEC, SockType.SOCK_STREAM, Protocol.IPPROTO_TCP)
+    s = newSocket(Domain.AF_INET, SockType.SOCK_STREAM, Protocol.IPPROTO_TCP)
     s.connect(t.host, Port(t.port))
   except Exception:
     if not s.isNil:
@@ -168,9 +177,13 @@ proc connect*(t: HttpTransport): bool =
       return false
   t.socket = s
   t.connected = true
+  try:
+    setSocketTimeout(s, DEFAULT_HTTP_TIMEOUT_MS)
+  except Exception:
+    discard
   return true
 
-proc waitReadable(socket: Socket, timeoutMs: int): bool =
+proc waitReadable*(socket: Socket, timeoutMs: int): bool {.used.} =
   if timeoutMs <= 0: return true
   let fd = socket.getFd()
   var readfds: TFdSet
@@ -185,16 +198,12 @@ proc waitReadable(socket: Socket, timeoutMs: int): bool =
 proc readSseResponse(socket: Socket, timeoutMs: int): seq[SseEvent] =
   result = @[]
   var parser = newSseParser()
-  let deadline = getMonoTime() + initDuration(milliseconds = timeoutMs)
   var buf: array[4096, char]
+  try:
+    setSocketTimeout(socket, timeoutMs)
+  except Exception:
+    discard
   while true:
-    let remMs = (deadline - getMonoTime()).inMilliseconds
-    if remMs <= 0:
-      for evt in parser.flush(): result.add(evt)
-      break
-    if not waitReadable(socket, min(1000, remMs).int):
-      for evt in parser.flush(): result.add(evt)
-      break
     let n = recv(socket, addr(buf), sizeof(buf))
     if n <= 0:
       for evt in parser.flush(): result.add(evt)
@@ -203,15 +212,35 @@ proc readSseResponse(socket: Socket, timeoutMs: int): seq[SseEvent] =
     copyMem(chunk.cstring, addr(buf), n)
     for evt in parser.feed(chunk):
       result.add(evt)
+  try:
+    setSocketTimeout(socket, DEFAULT_HTTP_TIMEOUT_MS)
+  except Exception:
+    discard
+
+proc readHttpResponseHeaders*(socket: Socket): tuple[statusCode: int, headers: TableRef[string, string]] =
+  result.headers = newTable[string, string]()
+  let statusLine = socket.recvLine()
+  let statusParts = statusLine.split()
+  if statusParts.len >= 2:
+    try:
+      result.statusCode = parseInt(statusParts[1])
+    except CatchableError:
+      discard
+  while true:
+    let headerLine = socket.recvLine()
+    if headerLine.len == 0 or headerLine.strip().len == 0:
+      break
+    let colonPos = headerLine.find(':')
+    if colonPos >= 0:
+      let key = headerLine[0 ..< colonPos].strip().toLowerAscii()
+      let value = headerLine[colonPos + 1 .. ^1].strip()
+      result.headers[key] = value
 
 proc postJson*(t: HttpTransport, jsonBody: string): HttpResponse =
   if t.isNil or not t.connected:
     return HttpResponse(statusCode: 0, error: "not connected",
                        headers: newTable[string, string](), body: "")
   let request = buildHttpRequest(t.host, t.port, t.basePath, jsonBody, t.bearerToken)
-  if not waitReadable(t.socket, DEFAULT_HTTP_TIMEOUT_MS):
-    return HttpResponse(statusCode: 0, error: "socket timeout before send",
-                       headers: newTable[string, string](), body: "")
   try:
     let sent = t.socket.send(cstring(request), request.len)
     if sent < 0:
@@ -220,27 +249,9 @@ proc postJson*(t: HttpTransport, jsonBody: string): HttpResponse =
   except Exception:
     return HttpResponse(statusCode: 0, error: "send failed: " & getCurrentExceptionMsg(),
                        headers: newTable[string, string](), body: "")
-  if not waitReadable(t.socket, DEFAULT_HTTP_TIMEOUT_MS):
-    return HttpResponse(statusCode: 0, error: "socket timeout reading status",
-                       headers: newTable[string, string](), body: "")
-  let statusLine = t.socket.recvLine()
-  let statusParts = statusLine.split()
-  var statusCode = 0
-  if statusParts.len >= 2:
-    try:
-      statusCode = parseInt(statusParts[1])
-    except CatchableError:
-      discard
+  let (statusCode, headers) = readHttpResponseHeaders(t.socket)
   result.statusCode = statusCode
-  result.headers = newTable[string, string]()
-  while true:
-    let headerLine = t.socket.recvLine()
-    if headerLine.len == 0: break
-    let colonPos = headerLine.find(':')
-    if colonPos >= 0:
-      let key = headerLine[0 ..< colonPos].strip().toLowerAscii()
-      let value = headerLine[colonPos + 1 .. ^1].strip()
-      result.headers[key] = value
+  result.headers = headers
   let contentType = result.headers.getOrDefault("content-type", "")
   let transferEncoding = result.headers.getOrDefault("transfer-encoding", "")
   let contentLengthStr = result.headers.getOrDefault("content-length", "")
@@ -266,3 +277,58 @@ proc postJson*(t: HttpTransport, jsonBody: string): HttpResponse =
       if line.len == 0: break
       bodyLines.add(line)
     result.body = bodyLines.join("\n")
+
+proc postJsonStream*(t: HttpTransport, jsonBody: string,
+                     onEvent: proc(event: SseEvent): bool {.closure.}): tuple[statusCode: int, error: string] =
+  if t.isNil or not t.connected:
+    return (0, "not connected")
+  let request = buildHttpRequest(t.host, t.port, t.basePath, jsonBody, t.bearerToken)
+  try:
+    let sent = t.socket.send(cstring(request), request.len)
+    if sent < 0:
+      return (0, "send failed")
+  except Exception:
+    return (0, "send failed: " & getCurrentExceptionMsg())
+  let (statusCode, headers) = readHttpResponseHeaders(t.socket)
+  if statusCode != 200:
+    let contentLengthStr = headers.getOrDefault("content-length", "")
+    let body = if contentLengthStr.len > 0:
+      var clen = 0
+      try:
+        clen = parseInt(contentLengthStr)
+      except CatchableError:
+        discard
+      readFixedBody(t.socket, clen)
+    else:
+      var bodyLines: seq[string] = @[]
+      while true:
+        let line = t.socket.recvLine()
+        if line.len == 0: break
+        bodyLines.add(line)
+      bodyLines.join("\n")
+    return (statusCode, body)
+  let contentType = headers.getOrDefault("content-type", "")
+  if not contentType.startsWith("text/event-stream"):
+    return (0, "expected text/event-stream content type but got: " & contentType)
+  var parser = newSseParser()
+  var buf: array[4096, char]
+  try:
+    setSocketTimeout(t.socket, SSE_READ_TIMEOUT_MS)
+  except Exception:
+    discard
+  while true:
+    let n = recv(t.socket, addr(buf), sizeof(buf))
+    if n <= 0:
+      for evt in parser.flush():
+        if not onEvent(evt): break
+      break
+    var chunk = newString(n)
+    copyMem(chunk.cstring, addr(buf), n)
+    for evt in parser.feed(chunk):
+      if not onEvent(evt):
+        return (200, "")
+  try:
+    setSocketTimeout(t.socket, DEFAULT_HTTP_TIMEOUT_MS)
+  except Exception:
+    discard
+  return (200, "")

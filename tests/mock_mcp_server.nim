@@ -1,4 +1,4 @@
-import std/[json, os, strutils]
+import std/[json, strutils]
 
 proc main() =
   for line in stdin.lines:

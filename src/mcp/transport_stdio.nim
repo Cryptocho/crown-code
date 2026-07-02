@@ -6,7 +6,7 @@
 ## 手动 fork/exec/pipe 管理子进程，使用 posix 原生 I/O 实现超时感知的行读写。
 ## 不使用 std/osproc.startProcess()，保证文件描述符完全所有权。
 
-import std/[os, strutils, monotimes, locks]
+import std/[os, strutils, monotimes]
 import std/times except Time
 import std/posix
 import ../command_exec

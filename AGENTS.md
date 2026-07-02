@@ -22,13 +22,16 @@ A vibe coding tui tool written in nim, similar to cline but with some additional
 │   ├── search.nim                # Regex search (std/re)
 │   ├── search_json.nim           # JSON search output formatting
 │   ├── xdiff.nim                 # Unified diff engine (Myers O(ND))
-│   └── mcp/                      # MCP client protocol stack
-│       ├── jsonrpc.nim           # JSON-RPC 2.0 message builder/parser
-│       ├── transport_stdio.nim   # Stdio transport (fork/exec/pipe + select I/O)
-│       ├── transport_http.nim    # HTTP/SSE transport (TLS, chunked, event-stream)
-│       ├── sse.nim               # W3C Server-Sent Events parser
-│       └── client.nim            # MCP client core (transport, initialize, tools, heartbeat)
-│       └── registry.nim          # MCP registry (multi-server management, JSON config, lazy connect)
+│   ├── mcp/                      # MCP client protocol stack
+│   │   ├── jsonrpc.nim           # JSON-RPC 2.0 message builder/parser
+│   │   ├── transport_stdio.nim   # Stdio transport (fork/exec/pipe + select I/O)
+│   │   ├── transport_http.nim    # HTTP/SSE transport (TLS, chunked, event-stream)
+│   │   ├── sse.nim               # W3C Server-Sent Events parser
+│   │   ├── client.nim            # MCP client core (transport, initialize, tools, heartbeat)
+│   │   └── registry.nim          # MCP registry (multi-server management, JSON config, lazy connect)
+│   └── api/                      # LLM API client
+│       ├── types.nim             # Core type definitions (Message, Tool, ApiStreamChunk, etc.)
+│       └── openai.nim            # OpenAI Compatible API client (streaming + non-streaming)
 ├── tests/                        # Nim test files (.nim)
 │   ├── test_runner.nim           # Test entry point (imports all suites)
 │   ├── test_file_reader.nim      # File reader tests (15 cases)
@@ -51,20 +54,21 @@ A vibe coding tui tool written in nim, similar to cline but with some additional
 │   ├── test_mcp_sse.nim          # SSE parser tests (33 cases)
 │   ├── test_mcp_client.nim       # MCP client tests (17 cases)
 │   ├── test_mcp_registry.nim     # MCP registry tests (30 cases)
+│   ├── test_api_types.nim        # API types tests (20 cases)
+│   ├── test_openai.nim           # Non-streaming API tests (16+2 cases)
+│   ├── test_openai_streaming.nim # Streaming API tests (15+2 cases)
 │   └── mock_mcp_server.nim       # Mock MCP server for integration tests
 ├── build/                        # Build output directory
 │   ├── debug/                    # Debug binary
 │   ├── release/                  # Release binary
 │   └── test/                     # Test runner binary
 ├── ratatui-ffi/                  # Rust ratatui binding for future TUI (FFI submodule)
-├── temp/                         # C code migration reference (historical)
 ├── crown_code.nimble             # Nimble package file (build, test, deps)
 ├── config.nims                   # Project-level Nim config (mm:orc, threads:on)
 ├── Makefile                      # Build script (wraps nimble, moves binary)
 ├── .gitignore                    # Git ignore rules
 ├── .kilo/                        # Kilo planning and config
 │   └── plans/                    # Implementation plans
-├── TODO.md                       # Migration progress tracker
 ├── CHANGELOG.md                  # Feature-level changelog
 ├── AGENTS.md                     # This file
 ├── cline/                        # cline source code for reference

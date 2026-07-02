@@ -3,7 +3,6 @@ import std/strutils
 import std/unittest
 import list_files
 import ignore_rules
-import pathutils
 
 suite "list files - error handling":
   test "null path returns NullPath":

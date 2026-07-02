@@ -1,5 +1,20 @@
 # Changelog
 
+## OpenAI Compatible API 模块
+
+### Added
+- `src/api/types.nim`：核心类型定义。公共类型：`MessageRole`（system/user/assistant/tool/developer）、`Message`（role/content/toolCalls/toolCallId/name）、`Tool`（name/description/parameters JsonNode）、`ToolCall`（id/functionName/arguments/tcIndex）、`ApiStreamChunk`（case object，5 个 variant：text/reasoning/usage/toolCall/done）、`ApiResponse`（content/toolCalls/usage/error/finishReason）、`ApiClientConfig`（baseUrl/apiKey/model/temperature/maxTokens/streamOptions）、`ApiClient`（ref object，含 config/http）
+- `src/api/openai.nim`：OpenAI Compatible API 客户端。公共 API：`newApiClient`（工厂函数）、`buildChatRequest`（非流式 JSON 请求体构建，含 messages/tools/stream:false/temperature/maxTokens）、`parseChatResponse`（非流式 JSON 响应解析，含 error/choices/tool_calls/usage/finish_reason）、`createMessage`（非流式请求全流程：close→connect→buildChatRequest→postJson→parseChatResponse）、`parseStreamEvent`（单行 SSE data 解析，返回 seq[ApiStreamChunk]，支持 text/reasoning/tool_calls/usage/DONE/error 六种场景）、`createMessageStream`（流式请求全流程：connect→buildChatRequest(stream:true)→postJsonStream→tool call delta 累积→返回 ApiResponse）。tool call delta 累积：`Table[int, ToolCall]` 按 index 并行累积 id/functionName/arguments，arguments 直接拼接字符串片段
+- `tests/test_api_types.nim`：类型测试，6 个套件 20 个测试用例，覆盖 MessageRole/Message/Tool/ToolCall/ApiStreamChunk/ApiResponse/ApiClientConfig 构造
+- `tests/test_openai.nim`：非流式 API 测试，6 个套件 16 个测试用例 + 2 个集成测试（需要 OPENROUTER_API_KEY，不存在时 skip）。单元测试覆盖 buildChatRequest JSON 结构/messages 转换/tools 字段/parseChatResponse 正常/异常/空场景
+- `tests/test_openai_streaming.nim`：流式 API 测试，4 个套件 15 个测试用例 + 2 个集成测试（需要 OPENROUTER_API_KEY，不存在时 skip）。单元测试覆盖 parseStreamEvent 各 variant/SSE 注释忽略/单 tool call 跨 chunk 累积/多 tool call 并行累积
+
+### Changed
+- `src/mcp/transport_http.nim`：提取 `readHttpResponseHeaders`（从 socket 读取 HTTP 状态行+headers，返回 statusCode 和 headers 表）；`postJson` 改用 `readHttpResponseHeaders` 减少重复代码；新增 `postJsonStream`（流式 SSE POST，接受闭包回调 `proc(event: SseEvent): bool`，回调返回 false 中止流）；`connect` 改用 `AF_INET` 替代 `AF_UNSPEC` 避免 IPv6 不兼容；去掉 `waitReadable` 的 `select()` 调用，解决 SSL socket 上 `select()` 误判 TLS 协议数据为"可读"导致 `recvLine` 返回空的 bug；新增 `setSocketTimeout` proc（通过 `SO_RCVTIMEO` 设置 socket 级超时替代 `select()`）；`readSseResponse` 和 `postJsonStream` 改用阻塞 `recv` + socket 超时替代 `waitReadable` 轮询；修复 `readHttpResponseHeaders` 终止条件 `headerLine.strip().len == 0` 代替 `.len == 0`，解决 SSL socket 上 `recvLine` 返回 `\r\n`（len=2）导致 body 被当 header 消费的问题
+- `tests/test_runner.nim`：注册 `test_api_types`、`test_openai`、`test_openai_streaming` 三个新测试模块
+
+- Affected files: `src/api/types.nim`, `src/api/openai.nim`, `src/mcp/transport_http.nim`, `tests/test_api_types.nim`, `tests/test_openai.nim`, `tests/test_openai_streaming.nim`, `tests/test_runner.nim`
+
 ## MCP Registry 多 server 管理模块
 
 ### Added
