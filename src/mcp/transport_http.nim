@@ -21,7 +21,7 @@ type
     port: int
     tls: bool
     basePath: string
-    bearerToken: string
+    bearerToken*: string
     connected: bool
     lastError*: string
     socket*: Socket

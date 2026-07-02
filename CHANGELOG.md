@@ -1,5 +1,23 @@
 # Changelog
 
+## MCP 客户端核心模块
+
+### Added
+- `src/mcp/client.nim`：MCP 客户端核心。公共类型：`McpTransportKind`（mcpStdio/mcpHttp）、`McpConnectionState`（5 状态枚举）、`McpContent`（kind/text/data/mimeType）、`McpCallToolResult`（content/isError）、`McpTool`（name/description）、`McpClientConfig`（transport/command/args/serverUrl/authToken/getToken/refreshToken/timeouts/ping/reconnect/callbacks/protocolVersion/clientName/clientVersion）、`McpClient`（ref object with acyclic 标注，含 config/transportKind/stdio/http/state/lastError/requestIdCounter/initialized/heartbeatThread/heartbeatRunning/stateLock/transportLock）。公共 API：`newMcpClient`（传输初始化 + initialize 握手 + 心跳线程启动）、`callTool`（tools/call 请求，返回 McpCallToolResult）、`listTools`（tools/list 请求，返回 seq[McpTool]）、`getState`（线程安全状态查询）、`getLastError`（线程安全错误查询）、`destroyMcpClient`（清理）。内部实现：`sendJsonRpc`（双通道写/读，HTTP 401 → refreshToken → retry 流程）、`sendNotification`（无响应通知）、`initialize`（initialize + notifications/initialized）、`reconnect`（指数退避 1s→2s→4s→...→60s 上限，最多 3 次）、`heartbeatProc`（可配置间隔 ping 线程，失败触发 disconnect 回调 → reconnect → reconnect 回调）。线程安全：`sendJsonRpc`/`sendNotification` 使用 `transportLock` 串行化传输访问，`destroyMcpClient` 先关闭传输 FD 解除 I/O 阻塞再 joinThread 防止死锁
+- `tests/mock_mcp_server.nim`：Nim 编写的 stdin/stdout JSON-RPC 2.0 模拟 MCP 服务器，支持 initialize/tools/list（3 工具）/tools/call（7 工具场景：echo/add/greet/image_tool/error_tool/empty_tool/unknown_tool）/ping，未知方法返回 -32601 错误
+- `tests/test_mcp_client.nim`：5 套件 17 个测试用例，覆盖 Null handling（6 测试）、Error state（4 测试）、Default values（2 测试）、Mock server integration（7 测试 + binary 不存在时 skip）、Heartbeat lifecycle（1 测试）
+
+### Changed
+- `Makefile`：新增 `MOCK_SERVER` 构建规则，`test` 目标依赖 `$(MOCK_SERVER)` 确保 mock server 二进制可用
+- `src/mcp/transport_http.nim`：`bearerToken` 字段改为导出（`*`），供 client.nim 在 401 retry 时更新 token
+- `src/mcp/transport_stdio.nim`：`remainingMs` 改用 `inMilliseconds()` API 替代手动 cast 除法
+- `tests/test_runner.nim`：注册 `test_mcp_client` 测试模块
+
+### Bug Fixes
+- `src/mcp/client.nim`：`destroyMcpClient` 先关闭传输 FD 再 joinThread，防止心跳线程阻塞在 I/O 时死锁；`sendJsonRpc`/`sendNotification` 新增 `transportLock` 互斥，防止应用线程与心跳线程同时操作同一组 FD 导致竞态条件；`initialize` 中 `lastError` 写入增加 `stateLock` 保护
+
+- Affected files: `src/mcp/client.nim`, `tests/mock_mcp_server.nim`, `tests/test_mcp_client.nim`, `Makefile`, `src/mcp/transport_http.nim`, `src/mcp/transport_stdio.nim`, `tests/test_runner.nim`
+
 ## SSE 流式响应解析模块
 
 ### Added

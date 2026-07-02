@@ -13,8 +13,28 @@ release:
 	nimble build -d:release
 	mv crown_code build/release/crown-code
 
-test:
-	nimble test
+MOCK_SERVER = build/test/mock_mcp_server
+
+$(MOCK_SERVER): tests/mock_mcp_server.nim
+	mkdir -p build/test
+	nim c -o:$(MOCK_SERVER) tests/mock_mcp_server.nim
+
+test: $(MOCK_SERVER)
+	@set -o pipefail; \
+	start=$$(date +%s%3N); \
+	script -qc "nimble test" /dev/null 2>&1 | tee /tmp/crown-test.log; \
+	rc=$$?; \
+	end=$$(date +%s); \
+	pass=$$(grep -c '\[OK\]' /tmp/crown-test.log || true); \
+	fail=$$(grep -c '\[FAILED\]' /tmp/crown-test.log || true); \
+	skip=$$(grep -c '\[SKIPPED\]' /tmp/crown-test.log || true); \
+	total=$$((pass + fail + skip)); \
+	echo ""; \
+	echo "=== Test Summary ==="; \
+	echo "Passed:  $$pass/$$total"; \
+	echo "Time:    $$((elapsed / 1000))s $$((elapsed % 1000))ms"; \
+	if [ "$$fail" -gt 0 ]; then exit 1; fi; \
+	exit $$rc
 
 clean:
 	nimble clean

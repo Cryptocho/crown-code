@@ -26,7 +26,8 @@ A vibe coding tui tool written in nim, similar to cline but with some additional
 │       ├── jsonrpc.nim           # JSON-RPC 2.0 message builder/parser
 │       ├── transport_stdio.nim   # Stdio transport (fork/exec/pipe + select I/O)
 │       ├── transport_http.nim    # HTTP/SSE transport (TLS, chunked, event-stream)
-│       └── sse.nim               # W3C Server-Sent Events parser
+│       ├── sse.nim               # W3C Server-Sent Events parser
+│       └── client.nim            # MCP client core (transport, initialize, tools, heartbeat)
 ├── tests/                        # Nim test files (.nim)
 │   ├── test_runner.nim           # Test entry point (imports all suites)
 │   ├── test_file_reader.nim      # File reader tests (15 cases)
@@ -46,7 +47,9 @@ A vibe coding tui tool written in nim, similar to cline but with some additional
 │   ├── test_mcp_jsonrpc.nim      # JSON-RPC tests (14 cases)
 │   ├── test_mcp_stdio.nim        # Stdio transport tests (7 cases)
 │   ├── test_mcp_http.nim         # HTTP transport tests
-│   └── test_mcp_sse.nim          # SSE parser tests (33 cases)
+│   ├── test_mcp_sse.nim          # SSE parser tests (33 cases)
+│   ├── test_mcp_client.nim       # MCP client tests (17 cases)
+│   └── mock_mcp_server.nim       # Mock MCP server for integration tests
 ├── build/                        # Build output directory
 │   ├── debug/                    # Debug binary
 │   ├── release/                  # Release binary

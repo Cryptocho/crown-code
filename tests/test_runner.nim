@@ -19,3 +19,4 @@ import test_mcp_jsonrpc
 import test_mcp_stdio
 import test_mcp_http
 import test_mcp_sse
+import test_mcp_client

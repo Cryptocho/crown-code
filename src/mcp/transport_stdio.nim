@@ -106,7 +106,7 @@ proc startStdioTransport*(command: string, args: openArray[string] = []): StdioT
     result = nil
 
 proc remainingMs(deadline: MonoTime): int64 =
-  cast[int64](deadline - getMonoTime()) div 1_000_000
+  inMilliseconds(deadline - getMonoTime())
 
 type
   ReadLineResult* = object
