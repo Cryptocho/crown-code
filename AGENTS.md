@@ -28,6 +28,7 @@ A vibe coding tui tool written in nim, similar to cline but with some additional
 │       ├── transport_http.nim    # HTTP/SSE transport (TLS, chunked, event-stream)
 │       ├── sse.nim               # W3C Server-Sent Events parser
 │       └── client.nim            # MCP client core (transport, initialize, tools, heartbeat)
+│       └── registry.nim          # MCP registry (multi-server management, JSON config, lazy connect)
 ├── tests/                        # Nim test files (.nim)
 │   ├── test_runner.nim           # Test entry point (imports all suites)
 │   ├── test_file_reader.nim      # File reader tests (15 cases)
@@ -49,6 +50,7 @@ A vibe coding tui tool written in nim, similar to cline but with some additional
 │   ├── test_mcp_http.nim         # HTTP transport tests
 │   ├── test_mcp_sse.nim          # SSE parser tests (33 cases)
 │   ├── test_mcp_client.nim       # MCP client tests (17 cases)
+│   ├── test_mcp_registry.nim     # MCP registry tests (30 cases)
 │   └── mock_mcp_server.nim       # Mock MCP server for integration tests
 ├── build/                        # Build output directory
 │   ├── debug/                    # Debug binary
@@ -96,8 +98,7 @@ DO NOT use `nim c` command directly in project root — use `make` instead
 8. After confirmation, commit **ALL** changes (git add -A) and **push**
 > - Plans must include detailed steps and specifics, including steps in the development process(from 3 to 8 all written in plan)
 > - Before creating a plan, you **MUST** spawn a subagent to review it for feasibility and completeness
-> - CHANGELOG and commit messages must not contain internal milestone numbers (e.g. "Phase 2.1")
-> - Commit message only lists project code files (`src/`, `tests/`, `config.nims`, etc.), excluding management files like `TODO.md`, `AGENTS.md`, `CHANGELOG.md`
+> - Commit message and CHANGELOG only lists project code files (`src/`, `tests/`, `config.nims`, etc.), excluding management files like `TODO.md`, `AGENTS.md`, `CHANGELOG.md`
 
 ### Adding New Features
 

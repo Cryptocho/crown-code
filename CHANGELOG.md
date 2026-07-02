@@ -1,5 +1,16 @@
 # Changelog
 
+## MCP Registry 多 server 管理模块
+
+### Added
+- `src/mcp/registry.nim`：MCP Registry 多 server 管理模块。公共类型：`McpRegistryError`（reOk/reServerNotFound/reServerDisabled/reNotConnected/reConfigError）、`McpServerConfig`（transport/command/args/serverUrl/authToken/enabled）、`McpStatusCallback`（gcsafe proc 类型）、`McpRegistry`（ref object，含 configs/clients/payloads 表 + statusCb + lock + destroyed 标志）。公共 API：`newMcpRegistry`（构造函数）、`destroyRegistry`（先销毁所有 client join 心跳线程→清空 payloads→清空 configs→deinitLock）、`loadJsonConfig`（JSON 解析，验证 transport/command/url/enabled，支持 stdio 和 http）、`getClient`（懒创建，缓存复用，状态回调桥接）、`setStatusCallback`（线程安全设置）、`getServerNames`（返回配置列表）、`serverCount`（活跃客户端数）、`getLastError`（线程安全错误查询）。回调桥接：通过 `CallbackPayload` ref object + `cast[pointer]` 将心跳线程的 bare function pointer 回调转发到 registry 的 `McpStatusCallback`，锁在回调前释放防止死锁
+- `tests/test_mcp_registry.nim`：30 个测试用例，9 个套件（Nil safety 7 测试/Config parsing 11 测试/Server names 2 测试/Server count 2 测试/Get client 4 测试/Status callback 1 测试/Error handling 1 测试/Lifecycle 2 测试），覆盖 nil 安全、JSON 配置解析（含错误）、配置文件验证、server 名称/计数、懒连接+缓存复用、mock server 集成、销毁生命周期
+
+### Changed
+- `tests/test_runner.nim`：注册 `test_mcp_registry` 测试模块
+
+- Affected files: `src/mcp/registry.nim`, `tests/test_mcp_registry.nim`, `tests/test_runner.nim`
+
 ## MCP 客户端核心模块
 
 ### Added
@@ -27,22 +38,20 @@
 ### Changed
 - `src/mcp/transport_http.nim`：`HttpResponse` 新增 `events*: seq[SseEvent]` 字段（零值 `@[]`，向下兼容）；新增 `SSE_READ_TIMEOUT_MS` 常量（120s）；`postJson` 内集成分支：检测 `Content-Type: text/event-stream` 后调用 `readSseResponse`（`waitReadable` + `recv` 字节块 + `SseParser.feed`，非 `recvLine`），chunked SSE 返回错误；新增 `import mcp/sse`、`std/monotimes`、`std/times`
 - `tests/test_runner.nim`：注册 `test_mcp_sse` 测试模块
-- `TODO.md`：Phase 4.3 SSE 流式响应 标记完成
 
-- Affected files: `src/mcp/sse.nim`, `src/mcp/transport_http.nim`, `tests/test_mcp_sse.nim`, `tests/test_runner.nim`, `TODO.md`
+- Affected files: `src/mcp/sse.nim`, `src/mcp/transport_http.nim`, `tests/test_mcp_sse.nim`, `tests/test_runner.nim`
 
 ## MCP HTTP 传输层模块
 
 ### Added
 - `src/mcp/transport_http.nim`：MCP HTTP/Streamable 传输层基础。依赖 `std/net`、`std/strutils`、`std/tables`、`std/uri`、`std/posix`。公共类型：`HttpTransport`（ref object，含 socket/host/port/tls/basePath/bearerToken/connected/lastError）、`HttpResponse`（statusCode/headers/body/error）。公共 API：`newHttpTransport`（URL 解析，默认端口 http:80 https:443）、`connect`（TCP → TLS wrapConnectedSocket 握手）、`close`（nil-safe socket 关闭）、`postJson`（构建 HTTP/1.1 POST 请求，header 大小写不敏感查找，Transfer-Encoding 优先 Content-Length）、`isConnected`。内部实现：`buildHttpRequest`、`parseHttpResponse`（状态行解析含无 reason phrase 场景，Content-Type charset 前缀匹配）、`readChunkedBody`（chunk-ext 剥离，hex 大小写混合解析，trailer headers 处理，字节精确读取）、`readFixedBody`（recv 循环读至满 Content-Length 字节）。常量：`DEFAULT_HTTP_TIMEOUT_MS`（30s）、`MAX_RESPONSE_SIZE`（10MB）
 - `tests/test_mcp_http.nim`：6 个套件约 28 个测试用例，覆盖 URL 解析、HTTP 请求构建、响应解析（含无 reason phrase/charset/大小写混合 header）、header 大小写不敏感、chunked 解码（Transfer-Encoding 优先规则）、连接生命周期
-- `TODO.md`：Phase 4.3 完成，追加 SSE 流式响应 TODO
 - `config.nims`：添加 `switch("define", "ssl")` 启用 OpenSSL 支持
 
 ### Changed
 - `tests/test_runner.nim`：注册 `test_mcp_http` 测试模块
 
-- Affected files: `src/mcp/transport_http.nim`, `tests/test_mcp_http.nim`, `tests/test_runner.nim`, `TODO.md`, `config.nims`
+- Affected files: `src/mcp/transport_http.nim`, `tests/test_mcp_http.nim`, `tests/test_runner.nim`, `config.nims`
 
 ## stdio 传输层模块
 

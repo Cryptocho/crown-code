@@ -221,45 +221,36 @@
 ### 4.4 MCP 客户端核心
 - **C 对应**：`mcp.c` 中 `mcp_client_t` 及对外 API
 - **依赖**：4.2 stdio 传输, 4.3 HTTP 传输
-- [ ] 创建 `src/mcp/client.nim`
-- [ ] `McpClientConfig` 配置对象
-- [ ] `McpClient` ref object（状态、IO、requestId、锁）
-- [ ] `newMcpClient(config): McpClient`
-- [ ] `initialize()` — JSON-RPC `initialize` + `notifications/initialized`
-- [ ] `callTool(name, arguments): McpCallToolResult`
-- [ ] `listTools(): seq[McpTool]`
-- [ ] 心跳线程：定期 `ping`，断线自动重连
-- [ ] 自动重连（指数退避：`maxReconnect`, `maxReconnectDelay`）
-- [ ] 连接状态管理（`McpConnectionState` 枚举）
-- [ ] 线程安全（`std/locks`）
-- [ ] 创建 `tests/test_mcp_client.nim`（需 mock MCP server）
-- [ ] 更新 `tests/test_runner.nim`
-- [ ] 参照 `temp/tests/mock_mcp_server.py` 创建 `tests/mock_mcp_server.nim`
+- [x] 创建 `src/mcp/client.nim`
+- [x] `McpClientConfig` 配置对象
+- [x] `McpClient` ref object（状态、IO、requestId、锁）
+- [x] `newMcpClient(config): McpClient`
+- [x] `initialize()` — JSON-RPC `initialize` + `notifications/initialized`
+- [x] `callTool(name, arguments): McpCallToolResult`
+- [x] `listTools(): seq[McpTool]`
+- [x] 心跳线程：定期 `ping`，断线自动重连
+- [x] 自动重连（指数退避：`maxReconnect`, `maxReconnectDelay`）
+- [x] 连接状态管理（`McpConnectionState` 枚举）
+- [x] 线程安全（`std/locks`）
+- [x] 创建 `tests/test_mcp_client.nim`（需 mock MCP server）
+- [x] 更新 `tests/test_runner.nim`
+- [x] 参照 `temp/tests/mock_mcp_server.py` 创建 `tests/mock_mcp_server.nim`
 
 ### 4.5 MCP Registry（多 server 管理）
 - **C 对应**：`temp/include/mcp_registry.h`
-- **依赖**：4.4 MCP 客户端
-- [ ] 创建 `src/mcp/registry.nim`
-- [ ] `McpRegistry` ref object：`Table[string, McpClient]`
-- [ ] `loadJsonConfig(configJson: string)`
-- [ ] `getClient(name: string): McpClient`
-- [ ] 状态回调
-- [ ] 错误处理
-- [ ] 创建 `tests/test_mcp_registry.nim`
-- [ ] 更新 `tests/test_runner.nim`
+- **依赖**：4.4 MCP 客户端核心
+- [x] 创建 `src/mcp/registry.nim`
+- [x] `McpRegistry` ref object：`Table[string, McpClient]`
+- [x] `loadJsonConfig(configJson: string)`
+- [x] `getClient(name: string): McpClient`
+- [x] 状态回调
+- [x] 错误处理
+- [x] 创建 `tests/test_mcp_registry.nim`
+- [x] 更新 `tests/test_runner.nim`
 
 ---
 
-## Phase 5: 组装入口
-
-- [ ] 更新 `src/crown_code.nim` 导入所有功能模块
-- [ ] 实现主流程逻辑
-- [ ] `make debug` 构建验证
-- [ ] `make test` 全部测试通过
-
----
-
-## Phase 6: 检查测试代码和C测试代码功能是否一致
+## Phase 5: 检查测试代码和C测试代码功能是否一致
 
 ---
 

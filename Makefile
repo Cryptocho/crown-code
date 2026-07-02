@@ -25,6 +25,7 @@ test: $(MOCK_SERVER)
 	script -qc "nimble test" /dev/null 2>&1 | tee /tmp/crown-test.log; \
 	rc=$$?; \
 	end=$$(date +%s); \
+	elapsed=$$(( end * 1000 - start )); \
 	pass=$$(grep -c '\[OK\]' /tmp/crown-test.log || true); \
 	fail=$$(grep -c '\[FAILED\]' /tmp/crown-test.log || true); \
 	skip=$$(grep -c '\[SKIPPED\]' /tmp/crown-test.log || true); \
