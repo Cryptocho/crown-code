@@ -1,10 +1,12 @@
-import std/[json, tables]
+import std/[json, strutils, tables]
 import api/types
 import mcp/sse
 import mcp/transport_http
 
 proc newApiClient*(config: ApiClientConfig): ApiClient =
-  let transport = newHttpTransport(config.baseUrl, config.apiKey)
+  let endpointUrl = if config.baseUrl.endsWith("/chat/completions"): config.baseUrl
+                    else: config.baseUrl & "/chat/completions"
+  let transport = newHttpTransport(endpointUrl, config.apiKey)
   ApiClient(config: config, http: transport)
 
 proc messageToJson(msg: Message): JsonNode =

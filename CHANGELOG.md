@@ -1,5 +1,23 @@
 # Changelog
 
+## Agent Loop 核心模块
+
+### Added
+- `src/agent/tools.nim`：工具定义与执行调度模块。7 个工具（read_file/write_to_file/replace_in_file/execute_command/search_files/list_files/attempt_completion），OpenAI function calling JSON Schema 格式。公共 API：`getToolDefinitions`（返回 7 个 Tool 定义）、`executeTool`（按名称 case 分发执行，返回结果字符串，attempt_completion 返回 `[COMPLETION]` 前缀标记）。错误处理：必需参数缺失返回 `"Error: ..."`，底层模块异常通过 error enum 转换为可读消息
+- `src/agent/prompt.nim`：System prompt 构建模块。公共 API：`buildSystemPrompt(cwd)`（生成包含角色描述、工具使用说明、AVAILABLE TOOLS 列表、规则、系统信息的完整 prompt）。复用 `shell_detect.detectShells()` 检测默认 shell，使用 `hostOS` 检测操作系统
+- `src/agent/loop.nim`：Agent Loop 核心调度模块。公共 API：`runAgentLoop(config)`（双层 while 循环：外层读取 stdin 用户输入，内层流式 API 调用→工具执行→结果反馈）。流式回调正确忽略 partial tool call 增量，从最终 `ApiResponse.toolCalls` 收集完整工具调用。支持 `[TOOL_CALL]`/`[TOOL_RESULT]`/`[PROMPT]` stderr 日志。截断工具调用参数的处理：`try/except JsonParsingError` 捕获无效 JSON，记录错误到 history 并跳过
+- `tests/test_agent_tools.nim`：工具模块测试，31 个用例。覆盖工具定义结构（7 工具各字段完整性）、错误处理（空参数/未知工具）、基本功能（read_file/write_to_file/list_files/search_files/execute_command/replace_in_file）、attempt_completion 特殊标记
+- `tests/test_agent_prompt.nim`：Prompt 模块测试，8 个用例。覆盖所有 section 存在性（角色/TOOL USE/RULES/SYSTEM INFO）、cwd/OS/shell 信息、空 cwd 边界、section 顺序
+- `tests/test_agent_loop.nim`：集成测试，3 个用例（需要 ollama，不可用时 skip）。覆盖非流式文本对话、带 tools 的工具调用链、流式文本响应
+
+### Changed
+- `src/api/openai.nim`：`newApiClient` 自动追加 `/chat/completions` 到 baseUrl（已包含时跳过），保持向后兼容
+- `src/crown_code.nim`：入口改为调用 `runAgentLoop`，配置 ollama 默认参数（baseUrl: localhost:11434/v1, model: gemma4:e4b, temperature: 0.0, maxTokens: 4096）
+- `tests/test_runner.nim`：注册 `test_agent_tools`、`test_agent_prompt`、`test_agent_loop` 三个新测试模块
+- `tests/test_template.nim`：移除直接调用 `runApp()` 的测试（新版 `runApp` 启动交互循环等待 stdin，不适合自动化测试）
+
+- Affected files: `src/agent/tools.nim`, `src/agent/prompt.nim`, `src/agent/loop.nim`, `src/api/openai.nim`, `src/crown_code.nim`, `tests/test_agent_tools.nim`, `tests/test_agent_prompt.nim`, `tests/test_agent_loop.nim`, `tests/test_runner.nim`, `tests/test_template.nim`
+
 ## OpenAI Compatible API 模块
 
 ### Added

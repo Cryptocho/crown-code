@@ -25,4 +25,7 @@ import test_mcp_registry
 import test_api_types
 import test_openai
 import test_openai_streaming
+import test_agent_tools
+import test_agent_prompt
+import test_agent_loop
 {.pop.}
