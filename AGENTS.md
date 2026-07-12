@@ -121,8 +121,13 @@ Compared to cline, this project aims to deliver:
                                                           │   shell_detect           │
                                                           │   ignore_rules           │
                                                           │                          │
+                                                          │  IPC subsystem:          │
+                                                          │   ipc/message            │
+                                                          │   ipc/transport          │
+                                                          │   ipc/session_manager    │
+                                                          │   ipc/server             │
+                                                          │                          │
                                                           │  [Planned]               │
-                                                          │   Session manager        │
                                                           │   Vector index           │
                                                           │   Cost tracking          │
                                                           │   Checkpoint system      │
@@ -183,7 +188,7 @@ cargo add <dependency>                 # Add dependencies via cargo-edit
 - Module structure: one module per file, nested modules in directories
 - Use `r#` raw identifiers (e.g. `r#loop`) when a module name conflicts with a Rust keyword
 - Use `pub(crate)` visibility to expose items across sibling modules without making them public
-- CHANGELOG entries are written in Chinese (Simplified)
+- **Do not use phase numbers in commit messages or CHANGELOG entries.** Commit messages and changelogs describe what functionally changed, not which planning phase produced the change. Phase numbers belong in plan files (`.kilo/plans/`) and TODO.md only.
 
 ## CHANGELOG Format Specification
 

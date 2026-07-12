@@ -131,6 +131,7 @@ pub fn edit_file(path: &str, old_str: &str, new_str: &str, multiple: bool) -> Fi
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
     use std::io::Write;
 
     #[test]
@@ -355,5 +356,27 @@ mod tests {
         let result = edit_file(file_path.to_str().unwrap(), "anything", "new", false);
         assert_eq!(result.error, FileEditError::OldStringNotFound);
         let _ = std::fs::remove_file(&file_path);
+    }
+
+    #[test]
+    #[serial]
+    fn test_edit_file_denied_by_crownignore() {
+        crate::ignore_rules::reset_ignore_rules();
+        let original_dir = std::env::current_dir().unwrap();
+        let temp_dir = std::env::temp_dir().join("crown_test_edit_crownignore");
+        let _ = std::fs::create_dir_all(&temp_dir);
+        std::env::set_current_dir(&temp_dir).unwrap();
+        let ignore_path = temp_dir.join(".crownignore");
+        let mut f = std::fs::File::create(&ignore_path).unwrap();
+        writeln!(f, "secret.txt").unwrap();
+        f.flush().unwrap();
+        drop(f);
+        crate::ignore_rules::reset_ignore_rules();
+        let result = edit_file("secret.txt", "old", "new", false);
+        assert_eq!(result.error, FileEditError::ReadFailed);
+        assert_eq!(result.error_message, "Access denied by .crownignore rules");
+        let _ = std::fs::remove_file(&ignore_path);
+        std::env::set_current_dir(&original_dir).unwrap();
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

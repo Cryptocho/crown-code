@@ -58,6 +58,8 @@ pub fn write_file_content(path: &str, content: &str) -> FileWriterResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
+    use std::io::Write;
 
     fn get_read_count(absolute_path: &str) -> u32 {
         crate::file_reader::cache_get(absolute_path)
@@ -145,5 +147,27 @@ mod tests {
         );
         assert_eq!(get_read_count(&abs_path), 0);
         let _ = std::fs::remove_file(&file_path);
+    }
+
+    #[test]
+    #[serial]
+    fn test_write_file_denied_by_crownignore() {
+        crate::ignore_rules::reset_ignore_rules();
+        let original_dir = std::env::current_dir().unwrap();
+        let temp_dir = std::env::temp_dir().join("crown_test_writer_crownignore");
+        let _ = std::fs::create_dir_all(&temp_dir);
+        std::env::set_current_dir(&temp_dir).unwrap();
+        let ignore_path = temp_dir.join(".crownignore");
+        let mut f = std::fs::File::create(&ignore_path).unwrap();
+        writeln!(f, "secret.txt").unwrap();
+        f.flush().unwrap();
+        drop(f);
+        crate::ignore_rules::reset_ignore_rules();
+        let result = write_file_content("secret.txt", "content");
+        assert_eq!(result.error, FileWriterError::PermissionDenied);
+        assert_eq!(result.error_message, "Access denied by .crownignore rules");
+        let _ = std::fs::remove_file(&ignore_path);
+        std::env::set_current_dir(&original_dir).unwrap();
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

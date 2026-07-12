@@ -1,9 +1,26 @@
 # Changelog
 
+## IPC 协议定义
+
+### Added
+- `core/src/ipc/message.rs`：JSON-RPC 2.0 消息类型（`JsonRpcMessage`、`JsonRpcError`），4 个构造函数（`make_request`/`make_notification`/`make_response`/`make_error_response`），3 个分类判断（`is_request`/`is_notification`/`is_response`），12 个标准/自定义错误码常量，12 个方法/事件名常量
+- `core/src/ipc/transport.rs`：跨平台 Unix socket transport（`IpcTransport` 含 `ListenerOptions` reclaim/try_overwrite），`IpcConnection` 支持 `split()` 并发读写，socket 路径解析（CLI 参数 / `CROWN_SOCKET_PATH` 环境变量 / 默认 `/tmp/crown-code-{uid}.sock` 三级回退），`IpcTransportError` 枚举
+- `core/src/ipc/session_manager.rs`：`SessionManager`（`RwLock<HashMap>` + `Mutex<ApiClientConfig>`），`SessionState`（含 `event_tx` mpsc channel、`cancelled` AtomicBool flag），`SessionInfo`（Serialize/Deserialize），nanoid 12 字符 session ID 生成
+- `core/src/ipc/server.rs`：`IpcServer`（`new`/`run`/`shutdown`），`handle_connection`（biased select! 优先处理请求），`dispatch_request` 路由 6 个方法（create_session/list_sessions/destroy_session/user_message/cancel/set_config），user_message stub 通过 event channel 发送模拟事件
+- `core/src/main.rs` daemon 模式：`--socket-path` 参数，`CROWN_SOCKET_PATH` 环境变量，`ctrl_c()` 优雅关闭
+- 依赖：`nanoid 0.4`（session ID）、`libc`（getuid Unix）、tokio `signal` + `time` features
+- 42 个 IPC 单元测试 + 集成测试全覆盖
+
+### Refactored
+- `core/src/lib.rs`：新增 `pub mod ipc;`
+- `core/src/ipc/mod.rs`：4 模块声明
+
+- Affected files: `core/Cargo.toml`, `core/src/lib.rs`, `core/src/main.rs`, `core/src/ipc/mod.rs`, `core/src/ipc/message.rs`, `core/src/ipc/transport.rs`, `core/src/ipc/session_manager.rs`, `core/src/ipc/server.rs`
+
 ## 核心异步运行时迁移
 
 ### Architecture
-- `core/Cargo.toml`：移除 `libc` 依赖，移除 `reqwest` 的 `blocking` feature，新增 `tokio`（6 features：rt-multi-thread/net/io-util/sync/macros/process）和 `interprocess`（Phase 1.4 预备）依赖
+- `core/Cargo.toml`：移除 `libc` 依赖，移除 `reqwest` 的 `blocking` feature，新增 `tokio`（6 features：rt-multi-thread/net/io-util/sync/macros/process）和 `interprocess` 依赖
 - `core/src/main.rs`：入口改为 `#[tokio::main] async fn main()`
 - `core/src/mcp/transport_http.rs`：`reqwest::blocking::Client` → `reqwest::Client`（async），`post_json`/`post_json_stream` 变为 `async fn`
 - `core/src/mcp/transport_stdio.rs`：`std::process` → `tokio::process`，`libc::poll` → `tokio::time::timeout`，`std::thread` → `tokio::spawn`，所有 I/O 方法变为 `async fn`
@@ -180,17 +197,17 @@
 
 - Affected files: `core/src/file_reader.rs`, `core/src/lib.rs`
 
-### TODO
-- 三个模块的 crownignore 访问控制测试因 `.crownignore` 需写入 CWD（与 flaky test 修复冲突）未能覆盖，需人工手动测试：创建 `.crownignore` 写入被忽略路径，验证 file_reader 返回 PermissionDenied、file_writer 返回 PermissionDenied、file_edit 返回 ReadFailed
+- 三个模块的 crownignore 访问控制测试已通过 `serial_test` crate + `set_current_dir` 临时目录实现自动化覆盖（`core/src/file_reader.rs:637`、`core/src/file_writer.rs:152`、`core/src/file_edit.rs:363`）
+- 依赖：`core/Cargo.toml` 新增 `serial_test = "3"`
 
-- Affected files: `core/src/file_reader.rs`, `core/src/lib.rs`
+- Affected files: `core/Cargo.toml`, `core/src/file_reader.rs`, `core/src/file_writer.rs`, `core/src/file_edit.rs`, `CHANGELOG.md`
 
-## clineignore 忽略规则模块
+## crownignore 忽略规则模块
 
 ### Added
-- `core/src/ignore_rules.rs`：clineignore 忽略规则模块。全局状态使用 `Mutex<IgnoreRulesInner>`，懒初始化读取 `$HOME/.cline/data/.clineignore`（全局）和 `.clineignore`（项目）。核心函数：`load_ignore_file(path)`（读取文件，跳过空行和#注释，去除尾部空白）、`reset_ignore_rules()`（重置全局状态，测试用）、`check_ignore_path(path)`（检查路径是否被忽略：参数校验→init→转相对路径→全局规则检查→项目规则检查）。内部匹配：`!`前缀取反 + `fnmatch_pathname`匹配 + 无`/`的pattern加`*/`前缀再试
+- `core/src/ignore_rules.rs`: crownignore 忽略规则模块。全局状态使用 `Mutex<IgnoreRulesInner>`，懒初始化读取 `$HOME/.crown/data/.crownignore`（全局）和 `.crownignore`（项目）。核心函数：`load_ignore_file(path)`（读取文件，跳过空行和#注释，去除尾部空白）、`reset_ignore_rules()`（重置全局状态，测试用）、`check_ignore_path(path)`（检查路径是否被忽略：参数校验→init→转相对路径→全局规则检查→项目规则检查）。内部匹配：`!`前缀取反 + `fn match_pathname`匹配 + 无`/`的pattern加`*/`前缀再试
 - `core/src/lib.rs`：模块导出声明（pub mod ignore_rules）
-- `core/src/glob.rs`：暴露 `fnmatch_pathname` 为 `pub(crate)` 供 ignore_rules 调用
+- `core/src/glob.rs`：暴露 `fn match_pathname` 为 `pub(crate)` 供 ignore_rules 调用
 
 - Affected files: `core/src/ignore_rules.rs`, `core/src/lib.rs`, `core/src/glob.rs`
 

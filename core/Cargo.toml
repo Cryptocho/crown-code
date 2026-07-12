@@ -2,7 +2,7 @@
 name = "crown-core"
 version = "0.1.0"
 edition = "2024"
-description = "crown-code core library"
+description = "crown-code core"
 
 [dependencies]
 regex = "1"
@@ -10,8 +10,13 @@ reqwest = { version = "0.12", features = ["native-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 similar = "2"
-tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "sync", "macros", "process"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "sync", "macros", "process", "signal", "time"] }
 interprocess = { version = "2", features = ["tokio"] }
+serial_test = "3"
+nanoid = "0.4"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
 which = "6"

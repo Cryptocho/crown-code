@@ -334,6 +334,7 @@ pub fn read_file_range(path: &str, start_line: i32, end_line: i32) -> FileReader
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
     use std::io::Write;
 
     #[test]
@@ -628,5 +629,27 @@ mod tests {
         assert!(result.content.contains("(Showing lines 2-5 of 10 total."));
         assert!(result.content.contains("start_line=6"));
         let _ = std::fs::remove_file(&file_path);
+    }
+
+    #[test]
+    #[serial]
+    fn test_read_file_denied_by_crownignore() {
+        crate::ignore_rules::reset_ignore_rules();
+        let original_dir = std::env::current_dir().unwrap();
+        let temp_dir = std::env::temp_dir().join("crown_test_reader_crownignore");
+        let _ = std::fs::create_dir_all(&temp_dir);
+        std::env::set_current_dir(&temp_dir).unwrap();
+        let ignore_path = temp_dir.join(".crownignore");
+        let mut f = std::fs::File::create(&ignore_path).unwrap();
+        writeln!(f, "secret.txt").unwrap();
+        f.flush().unwrap();
+        drop(f);
+        crate::ignore_rules::reset_ignore_rules();
+        let result = read_file_range("secret.txt", 1, 10);
+        assert_eq!(result.error, FileReaderError::PermissionDenied);
+        assert_eq!(result.error_message, "Access denied by .crownignore rules");
+        let _ = std::fs::remove_file(&ignore_path);
+        std::env::set_current_dir(&original_dir).unwrap();
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

@@ -52,11 +52,11 @@
 
 Core daemon 需要并发处理多个 socket 连接 + 多个 agent loop + API 流式调用，必须引入 async runtime。同时引入 `interprocess` crate 实现跨平台本地 IPC（Unix socket / Windows named pipe）。
 
-- [ ] `core/Cargo.toml` 新增依赖：
+- [x] `core/Cargo.toml` 新增依赖：
   - `tokio`（rt-multi-thread, net, io-util, sync, macros）
   - `interprocess`（local-socket, tokio feature）— 跨平台本地 IPC
-- [ ] `core/src/main.rs` 改为 `#[tokio::main]`
-- [ ] 现有阻塞 I/O 全部改为 async：
+- [x] `core/src/main.rs` 改为 `#[tokio::main]`
+- [x] 现有阻塞 I/O 全部改为 async：
   - `api/openai.rs`：`reqwest::blocking` → `reqwest`（async）
   - `mcp/transport_http.rs`：`reqwest::blocking` → `reqwest`（async）
   - `mcp/transport_stdio.rs`：`std::process::Command` → `tokio::process::Command`
@@ -154,7 +154,6 @@ impl AgentSession {
 - [ ] 所有 `print!` / `eprintln!` 替换为 `handler.on_*` 调用
 - [ ] 所有 `stdin.read_line` 移除，用户输入由外层 IPC 传入
 - [ ] 支持 `cancel()` 通过 `AtomicBool` 中断正在进行的 API 调用
-- [ ] 保留 `main.rs` 中一个 CLI fallback 模式（`--cli` 参数），使用 stdin/stdout 直接交互，方便调试
 
 ### 1.4 Core: IPC Server + Session Manager
 
@@ -280,9 +279,8 @@ async fn main() {
 }
 ```
 
-- [ ] CLI 参数解析：`--socket-path`、`--cli`（stdin/stdout 模式，调试用）、`--config`
+- [ ] CLI 参数解析：`--socket-path`（覆盖默认 socket 路径）、`--config`（配置文件路径）
 - [ ] 默认进入 daemon 模式（监听本地 socket）
-- [ ] `--cli` 模式保留旧的 stdin/stdout 交互（不经过 IPC）
 
 ### 1.6 TUI: 基础框架
 

@@ -15,4 +15,5 @@ pub mod search;
 pub mod search_files;
 pub mod search_json;
 pub mod shell_detect;
+pub mod ipc;
 pub mod xdiff;
