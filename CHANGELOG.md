@@ -3,271 +3,218 @@
 ## Agent Loop 核心模块
 
 ### Added
-- `src/agent/tools.nim`：工具定义与执行调度模块。7 个工具（read_file/write_to_file/replace_in_file/execute_command/search_files/list_files/attempt_completion），OpenAI function calling JSON Schema 格式。公共 API：`getToolDefinitions`（返回 7 个 Tool 定义）、`executeTool`（按名称 case 分发执行，返回结果字符串，attempt_completion 返回 `[COMPLETION]` 前缀标记）。错误处理：必需参数缺失返回 `"Error: ..."`，底层模块异常通过 error enum 转换为可读消息
-- `src/agent/prompt.nim`：System prompt 构建模块。公共 API：`buildSystemPrompt(cwd)`（生成包含角色描述、工具使用说明、AVAILABLE TOOLS 列表、规则、系统信息的完整 prompt）。复用 `shell_detect.detectShells()` 检测默认 shell，使用 `hostOS` 检测操作系统
-- `src/agent/loop.nim`：Agent Loop 核心调度模块。公共 API：`runAgentLoop(config)`（双层 while 循环：外层读取 stdin 用户输入，内层流式 API 调用→工具执行→结果反馈）。流式回调正确忽略 partial tool call 增量，从最终 `ApiResponse.toolCalls` 收集完整工具调用。支持 `[TOOL_CALL]`/`[TOOL_RESULT]`/`[PROMPT]` stderr 日志。截断工具调用参数的处理：`try/except JsonParsingError` 捕获无效 JSON，记录错误到 history 并跳过
-- `tests/test_agent_tools.nim`：工具模块测试，31 个用例。覆盖工具定义结构（7 工具各字段完整性）、错误处理（空参数/未知工具）、基本功能（read_file/write_to_file/list_files/search_files/execute_command/replace_in_file）、attempt_completion 特殊标记
-- `tests/test_agent_prompt.nim`：Prompt 模块测试，8 个用例。覆盖所有 section 存在性（角色/TOOL USE/RULES/SYSTEM INFO）、cwd/OS/shell 信息、空 cwd 边界、section 顺序
-- `tests/test_agent_loop.nim`：集成测试，3 个用例（需要 ollama，不可用时 skip）。覆盖非流式文本对话、带 tools 的工具调用链、流式文本响应
+- `core/src/agent/tools.rs`：工具定义与执行调度模块（Rust 重写）。7 个工具（read_file/write_to_file/replace_in_file/execute_command/search_files/list_files/attempt_completion），OpenAI function calling JSON Schema 格式（`serde_json::json!` 宏）。公共 API：`get_tool_definitions() -> Vec<Tool>`（返回 7 个 Tool 定义，每个含 name/description/parameters）、`execute_tool(name: &str, args: &Value) -> String`（按名称 match 分发执行，attempt_completion 返回 `[COMPLETION]` 前缀标记）。错误处理：必需参数缺失返回 `"Error: ..."`，底层模块异常通过 error enum 转换为可读消息。输出格式：execute_command（`STDOUT:\n`/`STDERR:\n`/Exit code/abnormal exit/execution time）、list_files（`  ` 前缀 + `entries` 计数 + truncation 标记）、search_files（结果 + matches found 计数）
+- `core/src/agent/prompt.rs`：System prompt 构建模块（Rust 重写）。公共 API：`build_system_prompt(cwd: &str) -> String`（生成包含角色描述、TOOL USE、AVAILABLE TOOLS 列表、RULES、SYSTEM INFORMATION 五个 section 的完整 prompt）。复用 `crate::shell_detect::detect_shells()` 检测默认 shell，使用 `std::env::consts::OS` 检测操作系统
+- `core/src/agent/loop.rs`：Agent Loop 核心调度模块（Rust 重写）。公共 API：`run_agent_loop(config: ApiClientConfig)`（双层 while 循环：外层读取 stdin 用户输入，内层流式 API 调用→工具执行→结果反馈）。流式回调使用闭包 `impl FnMut(ApiStreamChunk) -> bool`，`use std::io::Write` 用于 `stdout.flush()`。支持 `[TOOL_CALL]`/`[TOOL_RESULT]`/`[PROMPT]` stderr 日志。JSON 解析失败处理：`serde_json::from_str` 捕获无效参数，记录错误到 history 并 `continue` 跳过执行
+- `core/src/agent/mod.rs`：模块导出 `pub mod tools; pub mod prompt; pub mod r#loop;`（`r#loop` raw identifier 避免 Rust 关键字冲突）
+- 测试：`agent/tools.rs` 31 个单元测试（工具定义 9 个 + 错误处理 9 个 + 基本功能 11 个 + replace_in_file 3 个），`agent/prompt.rs` 8 个单元测试（section 存在性 + 顺序）
 
 ### Changed
-- `src/api/openai.nim`：`newApiClient` 自动追加 `/chat/completions` 到 baseUrl（已包含时跳过），保持向后兼容
-- `src/crown_code.nim`：入口改为调用 `runAgentLoop`，配置 ollama 默认参数（baseUrl: localhost:11434/v1, model: gemma4:e4b, temperature: 0.0, maxTokens: 4096）
-- `tests/test_runner.nim`：注册 `test_agent_tools`、`test_agent_prompt`、`test_agent_loop` 三个新测试模块
-- `tests/test_template.nim`：移除直接调用 `runApp()` 的测试（新版 `runApp` 启动交互循环等待 stdin，不适合自动化测试）
+- `core/src/lib.rs`：新增 `pub mod agent;` 导出
+- `core/src/main.rs`：从占位符 `println!("crown-core: ready")` 替换为调用 `run_agent_loop`，使用 ollama 默认配置（baseUrl: localhost:11434/v1, model: gemma4:e4b, temperature: 0.0, maxTokens: 4096）
 
-- Affected files: `src/agent/tools.nim`, `src/agent/prompt.nim`, `src/agent/loop.nim`, `src/api/openai.nim`, `src/crown_code.nim`, `tests/test_agent_tools.nim`, `tests/test_agent_prompt.nim`, `tests/test_agent_loop.nim`, `tests/test_runner.nim`, `tests/test_template.nim`
-
-## OpenAI Compatible API 模块
-
-### Added
-- `src/api/types.nim`：核心类型定义。公共类型：`MessageRole`（system/user/assistant/tool/developer）、`Message`（role/content/toolCalls/toolCallId/name）、`Tool`（name/description/parameters JsonNode）、`ToolCall`（id/functionName/arguments/tcIndex）、`ApiStreamChunk`（case object，5 个 variant：text/reasoning/usage/toolCall/done）、`ApiResponse`（content/toolCalls/usage/error/finishReason）、`ApiClientConfig`（baseUrl/apiKey/model/temperature/maxTokens/streamOptions）、`ApiClient`（ref object，含 config/http）
-- `src/api/openai.nim`：OpenAI Compatible API 客户端。公共 API：`newApiClient`（工厂函数）、`buildChatRequest`（非流式 JSON 请求体构建，含 messages/tools/stream:false/temperature/maxTokens）、`parseChatResponse`（非流式 JSON 响应解析，含 error/choices/tool_calls/usage/finish_reason）、`createMessage`（非流式请求全流程：close→connect→buildChatRequest→postJson→parseChatResponse）、`parseStreamEvent`（单行 SSE data 解析，返回 seq[ApiStreamChunk]，支持 text/reasoning/tool_calls/usage/DONE/error 六种场景）、`createMessageStream`（流式请求全流程：connect→buildChatRequest(stream:true)→postJsonStream→tool call delta 累积→返回 ApiResponse）。tool call delta 累积：`Table[int, ToolCall]` 按 index 并行累积 id/functionName/arguments，arguments 直接拼接字符串片段
-- `tests/test_api_types.nim`：类型测试，6 个套件 20 个测试用例，覆盖 MessageRole/Message/Tool/ToolCall/ApiStreamChunk/ApiResponse/ApiClientConfig 构造
-- `tests/test_openai.nim`：非流式 API 测试，6 个套件 16 个测试用例 + 2 个集成测试（需要 OPENROUTER_API_KEY，不存在时 skip）。单元测试覆盖 buildChatRequest JSON 结构/messages 转换/tools 字段/parseChatResponse 正常/异常/空场景
-- `tests/test_openai_streaming.nim`：流式 API 测试，4 个套件 15 个测试用例 + 2 个集成测试（需要 OPENROUTER_API_KEY，不存在时 skip）。单元测试覆盖 parseStreamEvent 各 variant/SSE 注释忽略/单 tool call 跨 chunk 累积/多 tool call 并行累积
-
-### Changed
-- `src/mcp/transport_http.nim`：提取 `readHttpResponseHeaders`（从 socket 读取 HTTP 状态行+headers，返回 statusCode 和 headers 表）；`postJson` 改用 `readHttpResponseHeaders` 减少重复代码；新增 `postJsonStream`（流式 SSE POST，接受闭包回调 `proc(event: SseEvent): bool`，回调返回 false 中止流）；`connect` 改用 `AF_INET` 替代 `AF_UNSPEC` 避免 IPv6 不兼容；去掉 `waitReadable` 的 `select()` 调用，解决 SSL socket 上 `select()` 误判 TLS 协议数据为"可读"导致 `recvLine` 返回空的 bug；新增 `setSocketTimeout` proc（通过 `SO_RCVTIMEO` 设置 socket 级超时替代 `select()`）；`readSseResponse` 和 `postJsonStream` 改用阻塞 `recv` + socket 超时替代 `waitReadable` 轮询；修复 `readHttpResponseHeaders` 终止条件 `headerLine.strip().len == 0` 代替 `.len == 0`，解决 SSL socket 上 `recvLine` 返回 `\r\n`（len=2）导致 body 被当 header 消费的问题
-- `tests/test_runner.nim`：注册 `test_api_types`、`test_openai`、`test_openai_streaming` 三个新测试模块
-
-- Affected files: `src/api/types.nim`, `src/api/openai.nim`, `src/mcp/transport_http.nim`, `tests/test_api_types.nim`, `tests/test_openai.nim`, `tests/test_openai_streaming.nim`, `tests/test_runner.nim`
+- Affected files: `core/src/agent/tools.rs`, `core/src/agent/prompt.rs`, `core/src/agent/loop.rs`, `core/src/agent/mod.rs`, `core/src/lib.rs`, `core/src/main.rs`, `core/src/api/openai.rs`
 
 ## MCP Registry 多 server 管理模块
 
 ### Added
-- `src/mcp/registry.nim`：MCP Registry 多 server 管理模块。公共类型：`McpRegistryError`（reOk/reServerNotFound/reServerDisabled/reNotConnected/reConfigError）、`McpServerConfig`（transport/command/args/serverUrl/authToken/enabled）、`McpStatusCallback`（gcsafe proc 类型）、`McpRegistry`（ref object，含 configs/clients/payloads 表 + statusCb + lock + destroyed 标志）。公共 API：`newMcpRegistry`（构造函数）、`destroyRegistry`（先销毁所有 client join 心跳线程→清空 payloads→清空 configs→deinitLock）、`loadJsonConfig`（JSON 解析，验证 transport/command/url/enabled，支持 stdio 和 http）、`getClient`（懒创建，缓存复用，状态回调桥接）、`setStatusCallback`（线程安全设置）、`getServerNames`（返回配置列表）、`serverCount`（活跃客户端数）、`getLastError`（线程安全错误查询）。回调桥接：通过 `CallbackPayload` ref object + `cast[pointer]` 将心跳线程的 bare function pointer 回调转发到 registry 的 `McpStatusCallback`，锁在回调前释放防止死锁
-- `tests/test_mcp_registry.nim`：30 个测试用例，9 个套件（Nil safety 7 测试/Config parsing 11 测试/Server names 2 测试/Server count 2 测试/Get client 4 测试/Status callback 1 测试/Error handling 1 测试/Lifecycle 2 测试），覆盖 nil 安全、JSON 配置解析（含错误）、配置文件验证、server 名称/计数、懒连接+缓存复用、mock server 集成、销毁生命周期
+- `core/src/mcp/registry.rs`：MCP Registry 多 server 管理模块（Rust 重写）。公共类型：`McpRegistryError`（Ok/ServerNotFound/ServerDisabled/NotConnected/ConfigError）、`McpServerConfig`（transport/command/args/serverUrl/authToken/enabled）、`McpStatusCallback`（Box<dyn Fn> 类型）。公共 API：`McpRegistry::new`（构造函数）、`destroy`（先销毁所有 client→清空配置→清空回调）、`load_json_config`（JSON 解析，验证 transport/command/url/enabled）、`get_client`（懒创建+缓存复用，Weak/Arc 回调桥接替代 cast[pointer]）、`set_status_callback`、`server_names`、`server_count`、`last_error`。回调桥接：`Weak<Mutex<RegistryInner>>` + 闭包捕获
+- 测试：30 个测试用例，9 个套件（Nil safety 7 / Config parsing 11 / Server names 2 / Server count 2 / Get client 4 / Status callback 1 / Error handling 1 / Lifecycle 2）
 
 ### Changed
-- `tests/test_runner.nim`：注册 `test_mcp_registry` 测试模块
+- `core/src/mcp/mod.rs`：新增 `pub mod client; pub mod registry;` 导出
 
-- Affected files: `src/mcp/registry.nim`, `tests/test_mcp_registry.nim`, `tests/test_runner.nim`
+- Affected files: `core/src/mcp/registry.rs`, `core/src/mcp/mod.rs`
 
 ## MCP 客户端核心模块
 
 ### Added
-- `src/mcp/client.nim`：MCP 客户端核心。公共类型：`McpTransportKind`（mcpStdio/mcpHttp）、`McpConnectionState`（5 状态枚举）、`McpContent`（kind/text/data/mimeType）、`McpCallToolResult`（content/isError）、`McpTool`（name/description）、`McpClientConfig`（transport/command/args/serverUrl/authToken/getToken/refreshToken/timeouts/ping/reconnect/callbacks/protocolVersion/clientName/clientVersion）、`McpClient`（ref object with acyclic 标注，含 config/transportKind/stdio/http/state/lastError/requestIdCounter/initialized/heartbeatThread/heartbeatRunning/stateLock/transportLock）。公共 API：`newMcpClient`（传输初始化 + initialize 握手 + 心跳线程启动）、`callTool`（tools/call 请求，返回 McpCallToolResult）、`listTools`（tools/list 请求，返回 seq[McpTool]）、`getState`（线程安全状态查询）、`getLastError`（线程安全错误查询）、`destroyMcpClient`（清理）。内部实现：`sendJsonRpc`（双通道写/读，HTTP 401 → refreshToken → retry 流程）、`sendNotification`（无响应通知）、`initialize`（initialize + notifications/initialized）、`reconnect`（指数退避 1s→2s→4s→...→60s 上限，最多 3 次）、`heartbeatProc`（可配置间隔 ping 线程，失败触发 disconnect 回调 → reconnect → reconnect 回调）。线程安全：`sendJsonRpc`/`sendNotification` 使用 `transportLock` 串行化传输访问，`destroyMcpClient` 先关闭传输 FD 解除 I/O 阻塞再 joinThread 防止死锁
-- `tests/mock_mcp_server.nim`：Nim 编写的 stdin/stdout JSON-RPC 2.0 模拟 MCP 服务器，支持 initialize/tools/list（3 工具）/tools/call（7 工具场景：echo/add/greet/image_tool/error_tool/empty_tool/unknown_tool）/ping，未知方法返回 -32601 错误
-- `tests/test_mcp_client.nim`：5 套件 17 个测试用例，覆盖 Null handling（6 测试）、Error state（4 测试）、Default values（2 测试）、Mock server integration（7 测试 + binary 不存在时 skip）、Heartbeat lifecycle（1 测试）
+- `core/src/mcp/client.rs`：MCP 客户端核心（Rust 重写）。公共类型：`McpTransportKind`（Stdio/Http）、`McpConnectionState`（5 状态枚举）、`McpContent`、`McpCallToolResult`、`McpTool`、`McpClientConfig`、`McpClient`。公共 API：`McpClient::new`、`call_tool`、`list_tools`、`state`、`last_error`、`destroy`。内部实现：`send_json_rpc`（双 Mutex 串行化写/读，HTTP 401 → refresh_token → retry）、`send_notification`、`initialize`、`reconnect`（指数退避 1s→2s→4s→60s 上限，最多 3 次）、`heartbeat_proc`（AtomicBool + 100ms polling loop）。线程安全：`ClientInner` 内 `transport_lock` 串行化传输访问，`destroy` 先关闭传输再 join 心跳线程防止死锁。回调：`Option<Box<dyn Fn() + Send + Sync>>`
+- `core/src/bin/mock_mcp_server.rs`：Rust 重写的 stdin/stdout JSON-RPC 2.0 模拟 MCP 服务器（~70 行）。覆盖 initialize / tools/list（3 工具）/ tools/call（7 个场景：echo/add/greet/image_tool/error_tool/empty_tool/unknown_tool）/ ping，未知方法返回 -32601
+- `core/build.rs`：构建脚本，支持 mock 服务器二进制路径暴露
+- 测试：17 个测试用例，5 个套件（Null handling 4 / Error state 4 / Default values 2 / Mock server integration 8 / Heartbeat lifecycle 1）
 
 ### Changed
-- `Makefile`：新增 `MOCK_SERVER` 构建规则，`test` 目标依赖 `$(MOCK_SERVER)` 确保 mock server 二进制可用
-- `src/mcp/transport_http.nim`：`bearerToken` 字段改为导出（`*`），供 client.nim 在 401 retry 时更新 token
-- `src/mcp/transport_stdio.nim`：`remainingMs` 改用 `inMilliseconds()` API 替代手动 cast 除法
-- `tests/test_runner.nim`：注册 `test_mcp_client` 测试模块
+- `core/src/mcp/mod.rs`：新增 `pub mod client;` 导出
 
-### Bug Fixes
-- `src/mcp/client.nim`：`destroyMcpClient` 先关闭传输 FD 再 joinThread，防止心跳线程阻塞在 I/O 时死锁；`sendJsonRpc`/`sendNotification` 新增 `transportLock` 互斥，防止应用线程与心跳线程同时操作同一组 FD 导致竞态条件；`initialize` 中 `lastError` 写入增加 `stateLock` 保护
+- Affected files: `core/src/mcp/client.rs`, `core/src/bin/mock_mcp_server.rs`, `core/build.rs`, `core/src/mcp/mod.rs`
 
-- Affected files: `src/mcp/client.nim`, `tests/mock_mcp_server.nim`, `tests/test_mcp_client.nim`, `Makefile`, `src/mcp/transport_http.nim`, `src/mcp/transport_stdio.nim`, `tests/test_runner.nim`
+## OpenAI Compatible API 模块
+
+### Added
+- `core/src/api/types.rs`：OpenAI Compatible API 核心类型定义（Rust 重写）。公共类型：`MessageRole`（System/User/Assistant/Tool/Developer，带 Display/FromStr）、`Message`（role/content/tool_calls/tool_call_id/name，带 `to_json_value` 处理 content null/tool_call_id 边缘情况）、`Tool`（name/description/parameters）、`ToolCall`（id/function_name/arguments/tc_index）、`ApiStreamChunk`（Rust enum：Text/Reasoning/Usage/ToolCall/Done）、`ApiError`（code/message）、`ApiUsage`（input_tokens/output_tokens/cache_read_tokens）、`ApiResponse`（content/tool_calls/usage/error/finish_reason）、`ApiClientConfig`（base_url/api_key/model/temperature/max_tokens/stream_options）、`ApiClient`（config/http: HttpTransport）
+- `core/src/api/openai.rs`：OpenAI Compatible API 客户端（Rust 重写）。公共 API：`new_client`（工厂函数，自动追加 `/chat/completions`）、`build_chat_request`（非流式 JSON 请求体构建，含 messages/tools/stream/temperature/max_tokens）、`parse_chat_response`（非流式 JSON 响应解析，含 error/choices/tool_calls/usage/finish_reason）、`create_message`（非流式请求全流程：buildChatRequest→postJson→parseChatResponse）、`parse_stream_event`（单行 SSE data 解析，返回 Vec<ApiStreamChunk>，支持 text/reasoning/tool_calls/usage/DONE/error/JSON parse error 七种场景）、`create_message_stream`（流式请求全流程：buildChatRequest(stream:true)→postJsonStream→tool call delta 累积→返回 ApiResponse）。tool call delta 累积：`HashMap<i32, ToolCall>` 按 index 并行累积 id/function_name/arguments
+- 测试：51 个单元测试 + 4 个集成测试（`#[ignore]`，需要 OPENROUTER_API_KEY）。类型测试 20 个（MessageRole/Message/Tool/ToolCall/ApiStreamChunk/ApiResponse/ApiClientConfig 构造），非流式 API 测试 16 个（buildChatRequest JSON 结构/messages 转换/tools 字段/parseChatResponse 正常/异常/空场景），流式 API 测试 15 个（parseStreamEvent 各 variant/SSE 注释忽略/单 tool call 跨 chunk 累积/多 tool call 并行累积）
+
+### Changed
+- `core/src/api/mod.rs`：新建，导出 `pub mod types; pub mod openai;`
+- `core/src/lib.rs`：新增 `pub mod api;`
+
+- Affected files: `core/src/api/types.rs`, `core/src/api/openai.rs`, `core/src/api/mod.rs`, `core/src/lib.rs`
 
 ## SSE 流式响应解析模块
 
 ### Added
-- `src/mcp/sse.nim`：W3C Server-Sent Events 协议解析器。公共类型：`SseEvent`（event/data/id）、`SseParser`（ref object with ref count）。公共 API：`newSseParser`、`feed(chunk)`（增量解析，返回 `seq[SseEvent]`）、`flush`（流结束强制输出）、`reset`、`lastEventId`（跨事件持久化）、`reconnectionTime`。协议覆盖：`\n`/`\r\n`/`\r` 三种换行符归一化、BOM 剥离、注释(`:`)忽略、`event`/`data`/`id`/`retry` 字段识别（大小写不敏感，字段冒号后可选空格）、多行 data `\n` 拼接、`id` 含 `\0` 忽略、`retry` 非正整数忽略。依赖 `std/strutils`（仅标准库，无项目内依赖）
-- `tests/test_mcp_sse.nim`：33 个测试用例，3 个套件（完整文本解析 18 个 / 流式解析 10 个 / HTTP 集成 5 个），覆盖单事件、多事件、字段类型、多行 data、空白 data 行、注释、BOM、无 data 行不触发、null id、无效 retry、未知字段忽略、CRLF/CR 换行符、trailing space retry、冒号事件名、前置空格 data、分块流式解析（跨 chunk 和跨行切分）、flush 残留事件、reset 重置、lastEventId 跨事件持久化、parseHttpResponse 集成解析 SSE HTTP 响应体
+- `core/src/mcp/sse.rs`：W3C Server-Sent Events 协议解析器。公共类型：`SseEvent`（event/data/id）、`SseParser`（增量解析状态机）。公共 API：`SseParser::new`、`feed`（增量解析，返回 `Vec<SseEvent>`）、`flush`（流结束强制输出）、`reset`、`last_event_id`、`reconnection_time`。协议覆盖：`\n`/`\r\n`/`\r` 三种换行符归一化、BOM 剥离、注释(`:`)忽略、`event`/`data`/`id`/`retry` 字段识别（大小写不敏感，字段冒号后可选空格）、多行 data `\n` 拼接、`id` 含 `\0` 忽略、`retry` 非正整数忽略。无项目内依赖
+- 测试：30 个测试用例，覆盖完整文本解析（23 个）、流式解析（7 个）
 
 ### Changed
-- `src/mcp/transport_http.nim`：`HttpResponse` 新增 `events*: seq[SseEvent]` 字段（零值 `@[]`，向下兼容）；新增 `SSE_READ_TIMEOUT_MS` 常量（120s）；`postJson` 内集成分支：检测 `Content-Type: text/event-stream` 后调用 `readSseResponse`（`waitReadable` + `recv` 字节块 + `SseParser.feed`，非 `recvLine`），chunked SSE 返回错误；新增 `import mcp/sse`、`std/monotimes`、`std/times`
-- `tests/test_runner.nim`：注册 `test_mcp_sse` 测试模块
+- `core/Cargo.toml`：新增 `serde`、`serde_json`、`reqwest`、`libc` 依赖
+- `core/src/lib.rs`：新增 `pub mod mcp` 模块导出
 
-- Affected files: `src/mcp/sse.nim`, `src/mcp/transport_http.nim`, `tests/test_mcp_sse.nim`, `tests/test_runner.nim`
+- Affected files: `core/src/mcp/sse.rs`, `core/src/mcp/mod.rs`, `core/src/lib.rs`, `core/Cargo.toml`
 
 ## MCP HTTP 传输层模块
 
 ### Added
-- `src/mcp/transport_http.nim`：MCP HTTP/Streamable 传输层基础。依赖 `std/net`、`std/strutils`、`std/tables`、`std/uri`、`std/posix`。公共类型：`HttpTransport`（ref object，含 socket/host/port/tls/basePath/bearerToken/connected/lastError）、`HttpResponse`（statusCode/headers/body/error）。公共 API：`newHttpTransport`（URL 解析，默认端口 http:80 https:443）、`connect`（TCP → TLS wrapConnectedSocket 握手）、`close`（nil-safe socket 关闭）、`postJson`（构建 HTTP/1.1 POST 请求，header 大小写不敏感查找，Transfer-Encoding 优先 Content-Length）、`isConnected`。内部实现：`buildHttpRequest`、`parseHttpResponse`（状态行解析含无 reason phrase 场景，Content-Type charset 前缀匹配）、`readChunkedBody`（chunk-ext 剥离，hex 大小写混合解析，trailer headers 处理，字节精确读取）、`readFixedBody`（recv 循环读至满 Content-Length 字节）。常量：`DEFAULT_HTTP_TIMEOUT_MS`（30s）、`MAX_RESPONSE_SIZE`（10MB）
-- `tests/test_mcp_http.nim`：6 个套件约 28 个测试用例，覆盖 URL 解析、HTTP 请求构建、响应解析（含无 reason phrase/charset/大小写混合 header）、header 大小写不敏感、chunked 解码（Transfer-Encoding 优先规则）、连接生命周期
-- `config.nims`：添加 `switch("define", "ssl")` 启用 OpenSSL 支持
+- `core/src/mcp/transport_http.rs`：MCP HTTP/Streamable 传输层。使用 `reqwest::blocking::Client` 。公共类型：`HttpResponse`（status_code/headers/body/error/events）、`HttpTransport`（base_url/bearer_token/client/connected/last_error）。公共常量：`DEFAULT_HTTP_TIMEOUT_MS`（30s）、`MAX_RESPONSE_SIZE`（10MB）、`SSE_READ_TIMEOUT_MS`（120s）。公共 API：`HttpTransport::new`（URL 解析 + reqwest client 构建）、`is_connected`、`close`、`post_json`（自动检测 SSE 响应 → `SseParser::feed` / 普通 JSON 响应）、`post_json_stream`（流式 SSE POST，闭包回调中止支持）。依赖 `reqwest`（内置 HTTP/1.1、chunked 解码、TLS、超时管理）+ `mcp::sse`
+- 测试：7 个测试用例，覆盖 URL 解析、连接生命周期、close 幂等、post_json/post_json_stream 错误响应、SSE 检测、bearer token 存储
 
-### Changed
-- `tests/test_runner.nim`：注册 `test_mcp_http` 测试模块
-
-- Affected files: `src/mcp/transport_http.nim`, `tests/test_mcp_http.nim`, `tests/test_runner.nim`, `config.nims`
+- Affected files: `core/src/mcp/transport_http.rs`, `core/src/mcp/mod.rs`, `core/src/lib.rs`, `core/Cargo.toml`
 
 ## stdio 传输层模块
 
 ### Added
-- `src/mcp/transport_stdio.nim`：MCP stdio 传输层。手动 `fork()` + `pipe()` × 3 + `dup2()` + `execlp()` 管理子进程（不使用 `osproc.startProcess`，确保 fd 完全所有权）。核心 API：`startStdioTransport(command, args)`（返回 `StdioTransport` ref object，包含 readFd/writeFd/stderrFd/childPid/stderrBuf），`readJsonLine(t, timeoutMs)`（select 轮询 + monotonic deadline 实现超时，逐字节读取跳过 `\r`，遇 `\n` 返回，超时返回 `teTimeout`，EOF 返回 `teEof`），`writeJsonLine(t, line, timeoutMs)`（追加 `\n` 后 write，EINTR 重试），`close(t)`（SIGTERM → WNOHANG 循环 5 秒 → SIGKILL → waitpid 回收 + 关闭所有 fd），`getStderr(t)`（返回环形缓冲区中缓存的 stderr 内容）。公共常量：`MCP_LINE_BUF_SIZE`（1MB）、`DEFAULT_LINE_TIMEOUT_MS`（30 秒）
-- `tests/test_mcp_stdio.nim`：8 个测试用例，覆盖空命令错误、进程启动（true）、超时读取、nil 关闭、资源清理、进程强制终止（sleep 10）
+- `core/src/mcp/transport_stdio.rs`：MCP stdio 传输层。使用 `std::process::Command`。核心 API：`start_stdio_transport(command, args)`（返回 `StdioTransport`，含 child/stdin/stdout/stderr_buf/stderr_thread），`read_json_line(t, timeout_ms)`（`libc::poll` 轮询 + `BufReader::read_line` 实现超时，Timeout 返回 `TransportError::Timeout`），`write_json_line(t, line)`（追加 `\n` 后 write_all + flush），`close(t)`（SIGKILL + wait + join stderr 线程），`get_stderr(t)`（`CircularBuffer::join` 返回 stderr 缓存）。公共常量：`MCP_LINE_BUF_SIZE`（1MB）、`DEFAULT_LINE_TIMEOUT_MS`（30 秒）。stderr 线程：`std::thread::spawn` + `BufReader::lines` → `CircularBuffer::push`
+- 测试：6 个测试用例，覆盖空命令错误、进程启动（true）、超时读取、close 两次安全、资源清理、进程强制终止
 
-### Changed
-- `tests/test_runner.nim`：注册 `test_mcp_stdio` 测试模块
-
-- Affected files: `src/mcp/transport_stdio.nim`, `tests/test_mcp_stdio.nim`, `tests/test_runner.nim`
+- Affected files: `core/src/mcp/transport_stdio.rs`, `core/src/mcp/mod.rs`, `core/src/lib.rs`, `core/Cargo.toml`
 
 ## JSON-RPC 通信层模块
 
 ### Added
-- `src/mcp/jsonrpc.nim`：JSON-RPC 2.0 通信层基础模块。依赖 `std/json`（无项目内依赖）。公共 API：`buildRequest`（构建请求字符串，含 `jsonrpc`/`method`/`params`/`id` 字段，`params` 为 `newJNull()` 时省略该字段）、`buildNotification`（构建通知字符串，无 `id` 字段，`params` 省略规则同上）、`parseResponse`（反序列化响应 JSON，仅做语法解析，不校验 `jsonrpc` 版本或 `id` 匹配）。所有构建函数使用 `%*` 宏类型安全构造 JSON
-- `tests/test_mcp_jsonrpc.nim`：14 个测试用例，3 个套件（buildRequest / buildNotification / parseResponse），覆盖正常参数、null params 省略、空 object/array 保留 params、method 特殊字符转义、valid result/error 响应、空对象/数组 JSON、空字符串/非法 JSON 异常
+- `core/src/mcp/jsonrpc.rs`：JSON-RPC 2.0 通信层基础模块。使用 `serde_json`。公共 API：`build_request(method, params, id)`（构建请求字符串，`params` 为 `None` 或 `Null` 时省略 `params` 字段）、`build_notification(method, params)`（构建通知字符串，无 `id` 字段，`params` 省略规则同上）、`parse_response(json_str)`（反序列化 JSON-RPC 响应，仅做语法解析，不校验 `jsonrpc` 版本或 `id` 匹配）。依赖 `serde_json`（无项目内依赖）
+- 测试：16 个测试用例，覆盖 buildRequest（6 个）、buildNotification（4 个）、parseResponse（6 个），覆盖正常参数、null params 省略、空 object/array 保留 params、method 特殊字符、valid result/error 响应、空对象/数组 JSON、空字符串/非法 JSON 异常
 
-### Changed
-- `tests/test_runner.nim`：注册 `test_mcp_jsonrpc` 测试模块
-
-- Affected files: `src/mcp/jsonrpc.nim`, `tests/test_mcp_jsonrpc.nim`, `tests/test_runner.nim`
-
-## 文件内容搜索模块
-
-### Added
-- `src/search_files.nim`：文件内容正则搜索模块。依赖 `search`（正则搜索）、`glob`（文件名过滤）、`ignore_rules`（clineignore 检测）、`pathutils`（路径处理）。公共类型：`SearchFilesError`（枚举，sfeSuccess/sfeNullParam/sfeDirNotFound/sfeRegexError）、`SearchFilesResult`（results/matchCount/error/errorMessage）。公共常量：`MAX_SEARCH_DEPTH`（10）、`MAX_SEARCH_OUTPUT`（256KB）、`MAX_CONTEXT_LINES`（1）。核心流程：`searchFiles`（参数校验 → 正则编译 → `absolutePath` 标准化根路径 → 调用 `searchDir` 递归搜索）。内部 proc `searchDir`（深度 ≥ MAX_SEARCH_DEPTH 返回 → `walkDir` 遍历 → glob 过滤条目名 → clineignore 检查 → 目录递归 / 文件调用 `searchFile`）。内部 proc `searchFile`（`readFile` 读取 → `matchAll` 获取所有匹配 → 循环输出：`{rel_path}\n│----\n` 头部 → 前一行上下文（matchLine > 1 时 `getLine(matchLine-1)`）→ `│{match_line}\n` → 后一行上下文（`getLine(matchLine+1)`）→ `│----\n` 尾部 → 截断检查追加 `[Results truncated...]`）
-- `tests/test_search_files.nim`：19 个测试用例，6 个套件（error handling / directory based tests / depth limiting / truncation / output format），覆盖空参数/nullParam、目录不存在/dirNotFound、无效正则/regexError、单文件单/多匹配、跨文件匹配、glob 文件名过滤、上下文行显示（前后各 1 行 + 边界限幅）、空文件、clineignore 过滤、深度限制（12 层嵌套，depth=0→10 共 11 层可达，第 12 层不可达）、256KB 输出截断（含 `[Results truncated...]` 标记）、输出格式（`│` 前缀 + `│----\n` 分隔符）
-
-### Changed
-- `tests/test_runner.nim`：注册 `test_search_files` 测试模块
-
-- Affected files: `src/search_files.nim`, `tests/test_search_files.nim`, `tests/test_runner.nim`
-
-## 目录列表模块
-
-### Added
-- `src/list_files.nim`：目录列表模块。依赖 `pathutils`（路径解析）和 `ignore_rules`（clineignore 检测）。公共类型：`ListFilesError`（枚举，Success/NullPath/DirNotFound/PermissionDenied/ReadFailed）、`ListFilesResult`（entries/count/didHitLimit/error/errorMessage）。内部 `cmpEntry` 排序比较器（目录优先，同组按字母序）。主入口 `listFiles`（10 步流程：参数验证 → clineignore 目录检查 → 路径解析 → `/` 和 `$HOME` 安全限制返回空结果 → `dirExists` 存在性检查 → `walkDir` 遍历（`relative=true`，跳过 `.`/`..`）→ 逐条目 clineignore 过滤 → 达到 `MAX_LIST_ENTRIES=200` 截断 → `sort` 排序 → 返回结果）。目录不可读时 `try/except CatchableError` 返回 `ReadFailed`
-- `tests/test_list_files.nim`：12 个测试用例，4 个套件（error handling / basic functionality / limit / ignore rules），覆盖空路径、不存在路径、根目录安全限制、家目录安全限制、空目录、混合文件/目录列表、目录优先排序、字母序、隐藏文件、特殊字符文件名、200 条目截断、clineignore 文件过滤、clineignore 目录阻止
-
-### Changed
-- `tests/test_runner.nim`：注册 `test_list_files` 测试模块
-
-- Affected files: `src/list_files.nim`, `tests/test_list_files.nim`, `tests/test_runner.nim`
+- Affected files: `core/src/mcp/jsonrpc.rs`, `core/src/mcp/mod.rs`, `core/src/lib.rs`, `core/Cargo.toml`
 
 ## 命令执行模块
 
 ### Added
-- `src/command_exec.nim`：命令执行模块。依赖 `shell_detect`（Shell 检测）。公共类型：`CommandError`（枚举，ceOk/ceApprovalDenied/ceExecutionFailed/ceTimeout）、`CommandResult`（stdout/stderr/exitCode/executionTime/abnormalExit/error）。公共常量：`MaxFullOutputSize`（1MB 输出截断）、`DefaultTimeoutMs`（300 秒超时）、`CircularBufferSize`（2000 槽）。辅助函数：`trimWhitespace`（两端空白去除）、`splitCommands`（按 `&&`/`||`/`&`/`|`/`;` 拆分子命令）、`requiresApproval`（审批检查存根，始终返回 `true`）。`CircularBuffer` 环形缓冲区（`initCircularBuffer`/`pushCircularBuffer`/`joinCircularBuffer`，线程安全锁定）。核心 `execCommand`（10 步流程：trim → splitCommands → 黑名单审批检查 → `detectShells` 获取 shell → `startProcess` 启动子进程（POSIX: `bash -l -c`，Windows: `cmd.exe /c`）→ 双线程流式读取 stdout/stderr → `waitForExit` 带超时 → 超时 `terminate`+`kill` → 拼接输出 → 执行时间统计）
-- `tests/test_command_exec.nim`：27 个测试用例，5 个套件（trimWhitespace / splitCommands / requiresApproval / CircularBuffer / execCommand），覆盖各种分隔符拆分、缓冲区溢出覆盖、echo 输出、exit code、stderr 捕获、空/空白命令、执行时间测量、黑名单审批检查、命令未找到处理
+- `core/src/command_exec.rs`：命令执行模块。公共类型：`CommandError`（Ok/ApprovalDenied/ExecutionFailed/Timeout）、`CommandResult`（stdout/stderr/exit_code/execution_time/abnormal_exit/error）、`CircularBuffer`（Mutex 保护的线程安全环形缓冲区）。公共常量：`MAX_FULL_OUTPUT_SIZE`（1MB）、`DEFAULT_TIMEOUT_MS`（300s）、`CIRCULAR_BUFFER_SIZE`（2000）。公共 API：`trim_whitespace`（两端空白/tab 去除）、`split_commands`（按 `&&`/`||`/`&|`/`&`/`|`/`;` 拆分，2-char 分隔符优先）、`requires_approval`（始终返回 true）、`exec_command`（10 步流程：trim → split → 黑名单检查 → detect_shells → 子进程启动 → 双线程 BufReader 流式读取 stdout/stderr → 超时轮询 → kill → join 线程 → 拼接输出 → 返回结果）。`CircularBuffer::join` 拼接所有行。超时实现：`child.try_wait()` 轮询 + `child.kill()` 强制终止
+- `core/src/lib.rs`：模块导出声明（pub mod command_exec）
 
-### Changed
-- `tests/test_runner.nim`：注册 `test_command_exec` 测试模块
+- Affected files: `core/src/command_exec.rs`, `core/src/lib.rs`
 
-- Affected files: `src/command_exec.nim`, `tests/test_command_exec.nim`, `tests/test_runner.nim`
+## 目录列表模块
+
+### Added
+- `core/src/list_files.rs`：目录列表模块。依赖 `pathutils`（路径解析）、`ignore_rules`（crownignore 检测）。公共类型：`ListFilesError`（Success/NullPath/DirNotFound/PermissionDenied/ReadFailed）、`ListFilesResult`（entries/count/did_hit_limit/error/error_message）。公共常量：`MAX_LIST_ENTRIES`（200）。主入口 `list_files`（10 步流程：参数验证 → crownignore 检查 → 路径解析 → `/` 和 `$HOME` 安全限制返回空结果 → `dirExists` 存在性检查 → `std::fs::read_dir` 遍历 → 逐条目 crownignore 过滤 → 达到 200 截断 → `sort_by` 排序（目录优先 + 字母序）→ 返回结果）。目录不可读时返回 `ReadFailed`
+- `core/src/lib.rs`：模块导出声明（pub mod list_files）
+
+- Affected files: `core/src/list_files.rs`, `core/src/lib.rs`
+
+## 文件内容搜索模块
+
+### Added
+- `core/src/search_files.rs`：文件内容正则搜索模块。依赖 `search`（正则搜索）、`glob`（文件名过滤）、`ignore_rules`（crownignore 检测）。公共类型：`SearchFilesError`（Success/NullParam/DirNotFound/RegexError）、`SearchFilesResult`（results/match_count/error/error_message）。公共常量：`MAX_SEARCH_DEPTH`（10）、`MAX_SEARCH_OUTPUT`（256KB）。核心流程：`search_files`（参数校验 → 正则编译 → `std::path::absolute` 标准化根路径 → 调用 `search_dir` 递归搜索）。内部 `search_dir`（深度 ≥ MAX_SEARCH_DEPTH 返回 → `std::fs::read_dir` 遍历 → glob 过滤条目名 → crownignore 检查 → 目录递归 / 文件调用 `search_file`）。内部 `search_file`（`read_to_string` 读取 → `match_all` 获取所有匹配 → 循环输出：`\n{rel_path}\n│----\n` 头部 → 前一行上下文 → `│{match_line}\n` → 后一行上下文 → `│----\n` 尾部 → 截断检查追加 `[Results truncated...]`）。`│` 为 U+2502 盒绘制字符
+- `core/src/lib.rs`：模块导出声明（pub mod search_files）
+
+- Affected files: `core/src/search_files.rs`, `core/src/lib.rs`
 
 ## Shell 检测模块
 
 ### Added
-- `src/shell_detect.nim`：Shell 检测模块。无项目内依赖。公共类型：`ShellInfo`（name/path/found）。核心 proc `detectShells*(): seq[ShellInfo]`，POSIX 分支读取 `$SHELL` 环境变量并用 `extractFilename` 提取 basename，Windows 分支在 PATH 中搜索 `bash.exe`/`pwsh.exe`/`powershell.exe`/`cmd.exe`（`findExe`），bash 额外检查 5 个已知安装路径
-- `tests/test_shell_detect.nim`：6 个测试用例，2 个套件（basic detection / common shells），覆盖非空结果、名称非空、路径非空、found 标记、路径存在性、常见 shell 检测（bash/zsh/sh/fish）
+- `core/src/shell_detect.rs`：Shell 检测模块。公共类型：`ShellInfo`（name/path/found）。核心函数 `detect_shells() -> Vec<ShellInfo>`，POSIX 分支读取 `$SHELL` 环境变量，Windows 分支搜索 PATH 中的已知 shell 可执行文件
+- `core/src/lib.rs`：模块导出声明（pub mod shell_detect）
+- `core/Cargo.toml`：新增 `regex`、`similar` 依赖
 
 ### Changed
-- `tests/test_runner.nim`：注册 `test_shell_detect` 测试模块
+- `core/src/main.rs`：保留壳程序入口
 
-- Affected files: `src/shell_detect.nim`, `tests/test_shell_detect.nim`, `tests/test_runner.nim`
+- Affected files: `core/src/shell_detect.rs`, `core/src/lib.rs`, `core/src/main.rs`, `core/Cargo.toml`
 
 ## 代码格式化模块
 
 ### Added
-- `src/formatter.nim`：文件代码格式化模块。依赖 `pathutils`（路径解析）。公共类型：`FormatterError`（枚举，Success/NullPath/ReadFailed/MemoryAlloc）、`FormatterResult`（error/errorMessage）。内部 `processContent`（逐字符迭代，行尾空白修剪 + 行首空白规范化：含制表符替换为 4 空格、只有空格完全移除，保留原有空行结构）。主入口 `formatFile`（6 步流程：参数验证 → 路径解析 → 文件读取 → processContent → 文件覆盖写入 → 返回结果）
-- `tests/test_formatter.nim`：10 个测试用例，2 个套件（error handling / content formatting），覆盖空路径、文件不存在、行尾空格修剪、行首 Tab 替换、混合空白处理、空格+Tab 混合、纯空格行首移除、无末尾换行保留、空文件
+- `core/src/formatter.rs`：代码格式化模块。公共类型：`FormatterError`（Success/NullPath/ReadFailed）、`FormatterResult`（error/error_message）。核心函数 `process_content(content)` 逐字符迭代：行尾空白修剪、行首含制表符→4空格、纯空格行首完全移除、保留空行结构。入口 `format_file(path)` 完整流程：参数验证→路径解析→读文件→格式化→写回
+- `core/src/lib.rs`：模块导出声明（pub mod formatter）
 
-### Changed
-- `tests/test_runner.nim`：注册 `test_formatter` 测试模块
-
-- Affected files: `src/formatter.nim`, `tests/test_formatter.nim`, `tests/test_runner.nim`
+- Affected files: `core/src/formatter.rs`, `core/src/lib.rs`
 
 ## 文件编辑模块
 
 ### Added
-- `src/file_edit.nim`：文件行级精确替换模块。依赖 `pathutils`（路径解析）、`ignore_rules`（clineignore 检测）、`file_writer`（文件写入）。公共类型：`FileEditError`（枚举，Success/FileNotFound/OldStringNotFound/MultipleMatches/ReadFailed/WriteFailed）、`FileEditResult`（error/errorMessage/matchCount）。内部辅助函数 `splitIntoLines`（按 `\n` 拆分，保留末尾空行）和 `joinLines`（行间插入 `\n`，末尾不加 `\n`）。主入口 `editFile`（10 步流程：路径解析 → clineignore → 文件读取 → 按行拆分 → 精确匹配计数 → 未找到/多次匹配检测 → 行替换 → 按行合并 → 写入文件 → 返回结果）。`editFile` 的 `multiple` 参数控制是否替换所有匹配行
-- `tests/test_file_edit.nim`：15 个测试用例，5 个套件（error handling / basic functionality / edge cases / access control），覆盖空路径、文件不存在、未找到 oldStr、多次匹配、单次精确替换、全部替换、首行/末行/单行替换、空 oldStr 匹配空行、newStr 含换行、尾随换行符、空文件、clineignore 拦截
+- `core/src/file_edit.rs`：文件行级精确替换模块。公共类型：`FileEditError`（Success/FileNotFound/OldStringNotFound/MultipleMatches/ReadFailed/WriteFailed）、`FileEditResult`（error/error_message/match_count）。内部函数 `split_into_lines(content)` 按 `\n` 拆分（末尾 `\n` 产生空串行），`join_lines(lines)` 行间 `\n` 连接。主入口 `edit_file(path, old_str, new_str, multiple)` 流程：路径解析→crownignore 检查→读文件→按行拆分→精确匹配计数→未找到/多次匹配错误→替换匹配行→行合并→写入文件（WriteFailed→WriteFailed，其他错误→ReadFailed）。支持单次替换（multiple=false）和全部替换（multiple=true）
+- `core/src/lib.rs`：模块导出声明（pub mod file_edit）
 
-### Changed
-- `tests/test_runner.nim`：注册 `test_file_edit` 测试模块
-
-- Affected files: `src/file_edit.nim`, `tests/test_file_edit.nim`, `tests/test_runner.nim`
+- Affected files: `core/src/file_edit.rs`, `core/src/lib.rs`
 
 ## 文件写入模块
 
 ### Added
-- `src/file_writer.nim`：文件写入与缓存失效模块。依赖 `pathutils`（路径解析）、`ignore_rules`（clineignore 检测）和 `file_reader`（`cacheInvalidate`）。公共类型：`FileWriterError`（枚举，Success/NullPath/FileNotFound/PermissionDenied/WriteFailed）、`FileWriterResult`（error/errorMessage）。主入口 `writeFileContent`（6 步流程：参数验证 → clineignore → 路径解析 → 文件写入 → 缓存失效 → 返回成功）。`writeFileContent` 使用 `content: string = ""` 默认参数
-- `tests/test_file_writer.nim`：8 个测试用例，5 个套件（error handling / basic functionality / caching / access control / write failure），覆盖空路径、文件写入、空内容写入、缓存失效验证、clineignore 拦截、不存在目录写入、只读目录写入、重复写入缓存行为
+- `core/src/file_writer.rs`：文件写入模块。公共类型：`FileWriterError`（Success/NullPath/FileNotFound/PermissionDenied/WriteFailed）、`FileWriterResult`（error/error_message）。主入口 `write_file_content(path, content)` 流程：参数验证→crownignore 检查→路径解析→文件写入→缓存失效。写入后自动调用 `cache_invalidate` 使文件读取缓存失效
+- `core/src/lib.rs`：模块导出声明（pub mod file_writer）
 
-### Changed
-- `tests/test_runner.nim`：注册 `test_file_writer` 测试模块
-
-- Affected files: `src/file_writer.nim`, `tests/test_file_writer.nim`, `tests/test_runner.nim`
+- Affected files: `core/src/file_writer.rs`, `core/src/lib.rs`
 
 ## 文件读取模块
 
 ### Added
-- `src/file_reader.nim`：文件读取与格式化输出模块。依赖 `pathutils`（路径解析）和 `ignore_rules`（clineignore 检测）。公共类型：`FileReaderError`（枚举，SUCCESS/NULL_PATH/FILE_NOT_FOUND/PERMISSION_DENIED/READ_FAILED/MEMORY_ALLOC）、`LineRange`（startLine/endLine/totalLines/truncated）、`FileReaderResult`（content/range/error/errorMessage）、`FileCacheEntry`。缓存子系统：256 槽位哈希表（大小写不敏感 hash），`cacheGet`/`cacheSet`/`cacheInvalidate` 三接口。辅助函数：`getFileMtime`（`getLastModificationTime` 封装）、`countLines`（`\n` 计数）、`parseLineRange`（范围解析与自动交换）、`formatContentWithLineNumbers`（`行号 | 内容` 格式化 + 尾部文件统计）。主入口 `readFileRange`（12 步流程：参数验证 → clineignore → 路径解析 → 缓存 + mtime 检测 → 重复读取警告([File already read]/[DUPLICATE READ]) → 文件读取 → 行统计 → 格式化 → 拼接输出）
-- `tests/test_file_reader.nim`：15 个测试用例，5 个套件（error handling / basic functionality / caching / large files / path resolution），覆盖 null 路径、空路径、文件不存在、基础行号格式化、行范围读取、范围交换、超出 EOF、单行文件、缓存重复读取警告（3 次语义）、mtime 变化驱逐、大文件（2000 行）、绝对路径、相对路径
+- `core/src/file_reader.rs`：文件读取模块。公共类型：`FileReaderError`（Success/NullPath/FileNotFound/PermissionDenied/ReadFailed）、`LineRange`（start_line/end_line/total_lines/truncated）、`FileReaderResult`（content/range/error/error_message）、`FileCacheEntry`（key/read_count/mtime）。全局缓存使用 `Mutex<Vec<FileCacheEntry>>` 256 槽。主入口 `read_file_range(path, start_line, end_line)` 流程：参数验证→crownignore 检查→路径解析→缓存查找+mtime 检测（变化则驱逐）→重复读取警告（2次 `[File already read]`，≥3次 `[DUPLICATE READ]`）→文件读取→行统计+范围解析+边界裁剪→首次读取写入缓存→格式化输出（`行号 | 内容` + 尾部统计）。`LineRange` 自动交换：`end_line < start_line` 时 swap。格式化尾部：全部显示时 `(File has N lines total.)`，截断时 `(Showing lines X-Y of N total. Use start_line=Z to continue reading.)`
+- `core/src/lib.rs`：模块导出声明（pub mod file_reader）
 
-- Affected files: `src/file_reader.nim`, `tests/test_file_reader.nim`, `tests/test_runner.nim`
+- Affected files: `core/src/file_reader.rs`, `core/src/lib.rs`
+
+### TODO
+- 三个模块的 crownignore 访问控制测试因 `.crownignore` 需写入 CWD（与 flaky test 修复冲突）未能覆盖，需人工手动测试：创建 `.crownignore` 写入被忽略路径，验证 file_reader 返回 PermissionDenied、file_writer 返回 PermissionDenied、file_edit 返回 ReadFailed
+
+- Affected files: `core/src/file_reader.rs`, `core/src/lib.rs`
 
 ## clineignore 忽略规则模块
 
 ### Added
-- `src/ignore_rules.nim`：导入 `pathutils` 和 `glob`，依赖 3.1 路径解析。导出 3 个公共 API：`loadIgnoreFile`（读取 `.clineignore` 文件，跳过空行/`#` 注释，去除尾部空白）、`resetIgnoreRules`（测试用重置）、`checkIgnorePath`（主入口：绝对路径转相对 → `fnmatchPathname` 匹配 → 无 `/` 的 pattern 加 `*/` 前缀 → 全局规则 > 项目规则）。采用全局懒初始化状态（`initIgnoreRules`）
-- `tests/test_ignore_rules.nim`：12 个测试用例，2 个套件（loadIgnoreFile / checkIgnorePath），覆盖非存在文件、注释跳过、尾部空白去除、空行跳过、简单 glob 匹配、`*/` 前缀子目录匹配（一级）、含 `/` pattern 精确路径匹配、`!` 否定规则、空路径安全、绝对路径转相对路径
-- `src/glob.nim` 新增 `fnmatchPathname`（FNM_PATHNAME 语义：`*`/`?`/`[...]` 不匹配 `/`，`*` 回溯不跨越路径分隔符）和 `matchGlobPathname`（基于 `fnmatchPathname`）
-- `tests/test_glob.nim` 新增 fnmatchPathname 测试套件（10 个测试用例），覆盖 star 不匹配 `/`、`*/` 前缀单级子目录、`?` 不匹配 `/`、段内 `*` 匹配、字符类不匹配 `/`、否定、精确路径、尾部 `*`、空 pattern、`*` 匹配空字符串
+- `core/src/ignore_rules.rs`：clineignore 忽略规则模块。全局状态使用 `Mutex<IgnoreRulesInner>`，懒初始化读取 `$HOME/.cline/data/.clineignore`（全局）和 `.clineignore`（项目）。核心函数：`load_ignore_file(path)`（读取文件，跳过空行和#注释，去除尾部空白）、`reset_ignore_rules()`（重置全局状态，测试用）、`check_ignore_path(path)`（检查路径是否被忽略：参数校验→init→转相对路径→全局规则检查→项目规则检查）。内部匹配：`!`前缀取反 + `fnmatch_pathname`匹配 + 无`/`的pattern加`*/`前缀再试
+- `core/src/lib.rs`：模块导出声明（pub mod ignore_rules）
+- `core/src/glob.rs`：暴露 `fnmatch_pathname` 为 `pub(crate)` 供 ignore_rules 调用
 
-### Changed
-- `tests/test_runner.nim`：注册 `test_ignore_rules` 测试模块
-
-- Affected files: `src/glob.nim`, `src/ignore_rules.nim`, `tests/test_glob.nim`, `tests/test_ignore_rules.nim`, `tests/test_runner.nim`
-
-## 路径解析模块
-
-### Added
-- `src/pathutils.nim`：三个路径解析 proc：`resolveWorkspacePath`（相对/绝对路径解析）、`toRelPath`（相对路径计算，反斜杠归一化为正斜杠）、`resolvePath`（返回 `(absolutePath, displayPath)` 元组）
-- `tests/test_pathutils.nim`：14 test cases, 4 suites（normalizeSlashes / resolveWorkspacePath / toRelPath / resolvePath），covers separator normalization, CWD prefix stripping, backslash conversion, custom cwd parameter
-
-### Changed
-- `tests/test_runner.nim`：注册 `test_pathutils` 测试模块
-
-- Affected files: `src/pathutils.nim`, `tests/test_pathutils.nim`, `tests/test_runner.nim`
+- Affected files: `core/src/ignore_rules.rs`, `core/src/lib.rs`, `core/src/glob.rs`
 
 ## JSON 搜索输出格式化模块
 
 ### Added
-- `src/search_json.nim`：JSON 搜索输出格式化，导出 4 个公共 API：`jsonEscape`（JSON 字符串转义，处理 `"`/`\`/`\n`/`\t`/`\r`）、`formatStartJson`（搜索起始标记）、`formatEndJson`（搜索结束标记）、`formatMatchJson`（匹配结果 JSON，支持 `context_before`/`context_after` 数组）
-- `tests/test_search_json.nim`：25 个测试用例，4 个套件（jsonEscape / formatStartJson / formatEndJson / formatMatchJson），覆盖特殊字符转义、上下文输出、nil 安全
+- `core/src/search_json.rs`：JSON 搜索输出格式化模块。直接字符串拼接（不使用 serde_json）。公共 API：`json_escape(s)`（JSON 字符串转义：`"→\"`, `\→\\`, `\n→\\n`, `\t→\\t`, `\r→\\r`，双引号包裹）、`format_start_json(path)`（输出 `{"type":"start","path":"..."}\n`）、`format_end_json()`（输出 `{"type":"end"}\n`）、`format_match_json(match, ctx)`（输出匹配结果 JSON，ctx 非空且有内容时附加 context_before/context_after 数组）
+- `core/src/lib.rs`：模块导出声明（pub mod search_json）
 
-### Changed
-- `tests/test_runner.nim`：注册 `test_search_json` 测试模块
+- Affected files: `core/src/search_json.rs`, `core/src/lib.rs`
 
-- Affected files: `src/search_json.nim`, `tests/test_search_json.nim`, `tests/test_runner.nim`
-
-## Search 正则搜索模块
+## 路径解析模块
 
 ### Added
-- `src/search.nim`：使用 `std/re`（PCRE 封装），导出 5 个公共 API：`newSearch`（编译正则，支持 `soCaseInsensitive`/`soMultiLine`/`soDotAll` 选项）、`matchFirst`（单次匹配，返回 `Option[Match]`）、`matchAll`（全部匹配，返回 `seq[Match]`）、`calcLineNumber`（偏移量 → 1-based 行号）、`getLine`（行号 → 行内容）
-- `tests/test_search.nim`：29 个测试用例，7 个套件（newSearch / matchFirst / matchAll / calcLineNumber / getLine / options），覆盖无效正则、偏移匹配、跨行匹配、选项标志、边界情况
+- `core/src/pathutils.rs`：四个路径解析函数：`normalize_slashes`（反斜杠→正斜杠）、`resolve_workspace_path`（相对/绝对路径解析）、`to_rel_path`（相对路径计算）、`resolve_path`（返回 `(absolutePath, displayPath)` 元组）
+- `core/src/lib.rs`：模块导出声明（pub mod pathutils）
 
-### Changed
-- `tests/test_runner.nim`：注册 `test_search` 测试模块
-
-- Affected files: `src/search.nim`, `tests/test_search.nim`, `tests/test_runner.nim`
+- Affected files: `core/src/pathutils.rs`, `core/src/lib.rs`
 
 ## XDiff Unified Diff 引擎
 
 ### Added
-- `src/xdiff.nim`：基于 `experimental/diff.diffText`（Myers O(ND)）的 unified diff 引擎，导出 `diff*` 公共 API（`diff*(a, b: string; ctxLen: int = 3): string`）。支持上下文窗口合并（间距 ≤ 2×ctxLen）、0 计数 hunk header（pure addition/deletion）、`\ No newline at end of file` 内联标记、尾部换行符差异检测
-- `tests/test_diff.nim`：19 个测试用例，5 个套件（basic / single change / context window / edge cases），覆盖空输入、换行符边界、上下文窗口、hunk 合并、header 格式
+- `core/src/xdiff.rs`：基于 `similar` crate（Myers O(ND)）的 unified diff 引擎，导出 `diff(a, b, ctx_len)` 公共 API。支持上下文窗口合并（间距 ≤ 2×ctxLen）、0 计数 hunk header（pure addition/deletion）、`\ No newline at end of file` 内联标记
+- `core/src/lib.rs`：模块导出声明（pub mod xdiff）
 
-### Changed
-- `tests/test_runner.nim`：注册 `test_diff` 测试模块
+- Affected files: `core/src/xdiff.rs`, `core/src/lib.rs`
 
-- Affected files: `src/xdiff.nim`, `tests/test_diff.nim`, `tests/test_runner.nim`
+## Search 正则搜索模块
+
+### Added
+- `core/src/search.rs`：使用 `regex` crate（PCRE2 兼容），导出 5 个公共 API：`new_search`（编译正则，支持 case_insensitive/multi_line/dot_all 选项）、`Search::match_first`（单次匹配，返回 `Option<Match>`）、`Search::match_all`（全部匹配，返回 `Vec<Match>`）、`calc_line_number`（偏移量 → 1-based 行号）、`get_line`（行号 → 行内容）
+- `core/src/lib.rs`：模块导出声明（pub mod search）
+- `core/Cargo.toml`：新增 `regex` 依赖
+
+- Affected files: `core/src/search.rs`, `core/src/lib.rs`, `core/Cargo.toml`
 
 ## Glob 通配符匹配模块
 
 ### Added
-- `src/glob.nim`：手动实现 fnmatch 算法（支持 `*`/`?`/`[...]` 回溯匹配），导出 `matchGlob`（单模式，`!` 前缀取反）和 `matchAnyGlob`（多模式，`!` 否定优先短路）
-- `tests/test_glob.nim`：32 个测试用例，覆盖通配符、字符类、否定义前缀、多模式组合、边界情况
+- `core/src/glob.rs`：手动实现 fnmatch 算法（支持 `*`/`?`/`[...]` 回溯匹配），导出 `match_glob`（单模式，`!` 前缀取反）、`match_glob_pathname`（FNM_PATHNAME 语义：`*`/`?` 不匹配 `/`，回溯不跨越路径分隔符）、`match_any_glob`（多模式，`!` 否定优先短路）
+- `core/src/lib.rs`：模块导出声明（pub mod glob）
 
-### Changed
-- `tests/test_runner.nim`：注册 `test_glob` 测试模块
-
-- Affected files: `src/glob.nim`, `tests/test_glob.nim`, `tests/test_runner.nim`
+- Affected files: `core/src/glob.rs`, `core/src/lib.rs`
 
 ## Context 上下文缓冲模块
 
 ### Added
-- `src/context.nim`：`Context` ref object 类型，提供 `newContext`、`addLine`、`clearContext` 三个 proc
-- `tests/test_context.nim`：5 个测试用例，覆盖 create / edge cases / add line / reset / nil safety
+- `core/src/context.rs`：`Context` struct，提供 `new`、`add_line`、`clear` 方法
+- `core/src/lib.rs`：模块导出声明（pub mod context）
 
-### Changed
-- `tests/test_runner.nim`：注册 `test_context` 测试模块
-
-- Affected files: `src/context.nim`, `tests/test_context.nim`, `tests/test_runner.nim`
+- Affected files: `core/src/context.rs`, `core/src/lib.rs`

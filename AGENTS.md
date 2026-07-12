@@ -1,156 +1,113 @@
 # Development Guide
 
-## Project description
-A vibe coding tui tool written in nim, similar to cline but with some additional features
+## Project Description
+
+A vibe coding TUI tool. Core (daemon-style process) communicates with frontends (TUI, future GUI/WebUI) via IPC (JSON-RPC over stdio/Unix socket). Replaces the original Nim prototype.
+
+Compared to cline, this project aims to deliver:
+- **Finer-grained rollback**: checkpoint after every file edit, not just at request boundaries
+- **Detailed error info**: structured JSON error responses with context, not plain strings
+- **Multi-session**: single core process handles multiple frontend sessions simultaneously
+- **Better TUI**: built with ratatui, full terminal UI with split panes, live streaming
+- **Workspace vector index**: build and query a vector index over the entire workspace for semantic search
+- **Accurate session cost stats**: include subagent calls in total cost tracking, not just top-level LLM requests
 
 ## Project Structure
 
 ```
 .
-├── src/                          # Nim source files (.nim)
-│   ├── crown_code.nim            # Main entry point
-│   ├── context.nim               # Context buffer (linesBefore/linesAfter)
-│   ├── glob.nim                  # Glob pattern matching (fnmatch)
-│   ├── ignore_rules.nim          # .clineignore rule matching
-│   ├── pathutils.nim             # Path resolution and normalization
-│   ├── file_reader.nim           # File reading with line numbering + cache
-│   ├── file_writer.nim           # File writing + cache invalidation
-│   ├── file_edit.nim             # Line-level exact replace
-│   ├── formatter.nim             # Code formatting (tabs→spaces, trailing trim)
-│   ├── shell_detect.nim          # Shell detection ($SHELL / PATH)
-│   ├── command_exec.nim          # Process spawn, output capture, timeout
-│   ├── search.nim                # Regex search (std/re)
-│   ├── search_json.nim           # JSON search output formatting
-│   ├── xdiff.nim                 # Unified diff engine (Myers O(ND))
-│   ├── agent/                    # Agent loop core
-│   │   ├── tools.nim             # Tool definitions + execution dispatch
-│   │   ├── prompt.nim            # System prompt builder
-│   │   └── loop.nim              # Agent loop (streaming API → tools → feedback)
-│   └── mcp/                      # MCP client protocol stack
-│       ├── jsonrpc.nim           # JSON-RPC 2.0 message builder/parser
-│       ├── transport_stdio.nim   # Stdio transport (fork/exec/pipe + select I/O)
-│       ├── transport_http.nim    # HTTP/SSE transport (TLS, chunked, event-stream)
-│       ├── sse.nim               # W3C Server-Sent Events parser
-│       └── client.nim            # MCP client core (transport, initialize, tools, heartbeat)
-│       └── registry.nim          # MCP registry (multi-server management, JSON config, lazy connect)
-├── tests/                        # Nim test files (.nim)
-│   ├── test_runner.nim           # Test entry point (imports all suites)
-│   ├── test_file_reader.nim      # File reader tests (15 cases)
-│   ├── test_file_writer.nim      # File writer tests (8 cases)
-│   ├── test_file_edit.nim        # File edit tests (15 cases)
-│   ├── test_formatter.nim        # Formatter tests (10 cases)
-│   ├── test_shell_detect.nim     # Shell detect tests (6 cases)
-│   ├── test_command_exec.nim     # Command exec tests (27 cases)
-│   ├── config.nims               # Test config (--path:src)
-│   ├── test_template.nim         # Bootstrap template test
-│   ├── test_context.nim          # Context tests (5 cases)
-│   ├── test_glob.nim             # Glob tests (32 cases)
-│   ├── test_pathutils.nim        # Path utils tests (14 cases)
-│   ├── test_diff.nim             # XDiff tests (19 cases)
-│   ├── test_search.nim           # Search tests (29 cases)
-│   ├── test_search_json.nim      # JSON search output tests (25 cases)
-│   ├── test_mcp_jsonrpc.nim      # JSON-RPC tests (14 cases)
-│   ├── test_mcp_stdio.nim        # Stdio transport tests (7 cases)
-│   ├── test_mcp_http.nim         # HTTP transport tests
-│   ├── test_mcp_sse.nim          # SSE parser tests (33 cases)
-│   ├── test_mcp_client.nim       # MCP client tests (17 cases)
-│   ├── test_mcp_registry.nim     # MCP registry tests (30 cases)
-│   └── mock_mcp_server.nim       # Mock MCP server for integration tests
-├── build/                        # Build output directory
-│   ├── debug/                    # Debug binary
-│   ├── release/                  # Release binary
-│   └── test/                     # Test runner binary
-├── crown_code.nimble             # Nimble package file (build, test, deps)
-├── config.nims                   # Project-level Nim config (mm:orc, threads:on)
-├── Makefile                      # Build script (wraps nimble, moves binary)
-├── .gitignore                    # Git ignore rules
-├── .kilo/                        # Kilo planning and config
-│   └── plans/                    # Implementation plans
-├── CHANGELOG.md                  # Feature-level changelog
-├── AGENTS.md                     # This file
-├── cline/                        # cline source code for reference
-└── CLINE.md                      # cline content description
+├── Cargo.toml                   # Workspace root
+├── Cargo.lock                   # Workspace-level lockfile
+├── core/                        # Core daemon binary (crown-core)
+│   ├── Cargo.toml
+│   └── src/
+│       └── main.rs
+├── tui/                         # TUI frontend binary (crown-tui)
+│   ├── Cargo.toml
+│   └── src/
+│       └── main.rs
+├── nim/                         # Original Nim prototype (archived)
+│   ├── src/
+│   ├── tests/
+│   └── ...
+├── flake.nix                    # Nix flake — build system + dev env
+├── flake.lock                   # Dependency lock
+├── rust-toolchain.toml          # Rust toolchain version/components
+├── .gitignore
+├── AGENTS.md                    # This file
+└── CHANGELOG.md
 ```
 
-## Workflow
+## Architecture
+
+```
+┌─────────────────┐
+│  tui (ratatui)  │  ←── JSON-RPC over stdio/socket ──→  ┌────────────────────────┐
+├─────────────────┤                                       │  core (daemon)         │
+│ gui (future)    │  ←── JSON-RPC over socket ──────────→  │                        │
+├─────────────────┤                                       │  - Agent loop          │
+│ webui (future)  │  ←── JSON-RPC over WebSocket ──────→  │  - File operations     │
+└─────────────────┘                                       │  - MCP client          │
+                                                          │  - Session manager     │
+                                                          │  - Vector index        │
+                                                          │  - Cost tracking       │
+                                                          │  - Checkpoint system   │
+                                                          └────────────────────────┘
+```
+
+- **JSON-RPC 2.0** over stdio for TUI, Unix domain sockets for GUI/WebUI
+- **Multi-session**: core assigns each frontend connection a session ID; sessions are isolated
+- **Checkpoint on every file write**: each edit creates a git-like checkpoint for rollback
+
+## Development Process
 
 ### Building the Project
 
-Use Make (wraps nimble for dependency management):
+All dependencies (Rust toolchain, openssl, pkg-config) managed by Nix:
 
 ```bash
-make          # Debug build and run
-make debug    # Debug build, output to build/debug/crown-code
-make release  # Optimized build, output to build/release/crown-code
-make test     # Run all tests, test binary in build/test/
-make clean    # Remove build artifacts
-```
+# Sandbox build (fully reproducible, for CI/deployment)
+nix build .#core              # Build core binary → ./result/bin/crown-core
+nix build .#tui               # Build tui binary  → ./result/bin/crown-tui
+nix build                     # Default: core
 
-DO NOT use `nim c` command directly in project root — use `make` instead
+# Development shell (inherits all deps from nix build)
+nix develop
+
+# Inside nix develop:
+cargo build -p crown-core
+cargo build -p crown-tui
+cargo test -p crown-core
+cargo test -p crown-tui
+cargo clippy -p crown-core
+cargo clippy -p crown-tui
+```
 
 ### Development Process
+
 1. Propose a plan and wait for approval
-2. Implement the plan, if the plan is found to be unworkable at any time, you should stop and report
-3. Use subagent to review uncommitted code for correctness, elegance, consistency, and absence of logic errors
-4. Update TODO.md (if exist)
-5. After review or upon user request, update CHANGELOG.md. Modifying CHANGELOG.md before review is prohibited
-6. Check whether AGENTS.md needs to be updated
-7. Ask the user if they want to write a commit message; if so, present an English commit message preview for confirmation before committing. Direct submission is prohibited
-8. After confirmation, commit **ALL** changes (git add -A) and **push**
-> - Plans must include detailed steps and specifics, including steps in the development process(from 3 to 8 all written in plan)
-> - Before creating a plan, you **MUST** spawn a subagent to review it for feasibility and completeness
-> - Commit message and CHANGELOG only lists project code files (`src/`, `tests/`, `config.nims`, etc.), excluding management files like `TODO.md`, `AGENTS.md`, `CHANGELOG.md`
-
-### Adding New Features
-
-1. Implement the feature in `src/`
-2. Create a corresponding test file in `tests/`
-  Build and verify: `make debug` or `make test`
-
-### Adding Tests
-
-After creating a new test file (e.g., `tests/test_new_feature.nim`), just run `make test`. 
-
-### Test Log Format
-
-`std/unittest` default output format:
-
-```
-[Suite] suite name
-  [OK] test name          # passed
-  [FAILED] test name      # failed (includes file:line:col and expression)
-  [SKIPPED] test name     # skipped (via skip())
-```
-
-- `[OK]` — passed, no extra output
-- `[FAILED]` — outputs file:line:col and the failed expression, e.g. `tests/test_foo.nim(9, 18): Check failed: 1 + 1 == 3`
-- `[SKIPPED]` — skipped by `skip()` call
-
-## Key Conventions
-
-- Source files go in `src/`
-- Test files go in `tests/`
-- Always build using `make` in the project root
-- DO NOT use `Glob` tool cause it can't see files in `.gitignore`, use terminal tools instead(`ls`)
+2. Implement the plan; if unworkable at any step, stop and report
+3. Use subagent to review uncommitted code
+4. Update CHANGELOG.md (after review, not before)
+5. Check whether AGENTS.md needs updating
+6. Ask the user about commit message; present preview in English
+7. After confirmation, commit **ALL** changes (`git add -A`) and push
 
 ## Coding Style
 
-- camelCase for procs/vars, PascalCase for types
-- Module names use snake_case (file `my_module.nim` → `import my_module`)
-- Use 2-space indentation
-- Prefer `func` (no side effects) over `proc` when possible
-- Avoid `using` statement; pass context explicitly
-
-## Respond Style
-
-- Always respond in Chinese, do not use mermaid (flowchart)
+- Rust naming conventions: snake_case for functions/variables, PascalCase for types
+- 4-space indentation
+- `cargo fmt` before committing
+- `cargo clippy` — no warnings
+- Module structure: one module per file, nested modules in directories
 
 ## CHANGELOG Format Specification
-Organize changes by feature module, using `## Feature Description` as the section title.
 
-Required field: `- Affected files:` list all changed file paths (wrapped in backticks). Newer changes come first.
+Organize changes by feature module, using `## Feature Description` as section title.
 
-Note: `Affected files` only includes project code files (`src/`, `tests/`, `config.nims`, etc.), excluding management files like `TODO.md`, `AGENTS.md`, `CHANGELOG.md`.
+Required: `- Affected files:` list all changed file paths (backtick-wrapped). Newer changes first.
+
+`Affected files` only includes project code (`core/`, `tui/`, `flake.nix`), not management files.
 
 Common subheadings:
 - `### Added` — new features/files
@@ -158,92 +115,3 @@ Common subheadings:
 - `### Bug Fixes` — bug fixes
 - `### Architecture` — architectural decisions
 - `### Breaking Changes` — breaking changes
-
----
-
-## Nim Quick Reference
-
-### Language Overview
-
-Nim is a statically-typed, compiled systems language with Python-like syntax:
-- Compiles to C (default), C++, or JavaScript via `nim c` / `nim cpp` / `nim js`
-- Memory management: ORC in this project
-- Powerful macro system and compile-time metaprogramming
-- Zero-cost abstractions via template/macro expansion at compile time
-
-### Import Convention
-
-```nim
-# Module file: src/foo/bar_baz.nim
-# Import it as:
-import foo/bar_baz
-```
-
-Import path maps to filesystem path relative to `src/`. The `src/` dir must be in Nim's search path (passed via `--path:src` or nimble).
-
-### std/unittest — Core API
-
-**Templates (test structure):**
-
-| API | Description |
-|-----|-------------|
-| `suite(name, body)` | Define a test suite with optional `setup` / `teardown` sections |
-| `test(name, body)` | Define a single test case |
-
-**Assertions:**
-
-| API | Description |
-|-----|-------------|
-| `check(conditions)` | Assert condition, continue on failure and print error |
-| `require(conditions)` | Assert condition, **quit immediately** on failure |
-| `expect(Exception1, Exception2, body)` | Assert body raises one of the listed exceptions |
-| `fail()` | Manually mark test as failed |
-| `skip()` | Skip current test (still executes, just marks skipped) |
-| `checkpoint(msg)` | Set a named checkpoint, printed on test failure |
-
-**Example:**
-
-```nim
-suite "math operations":
-  setup:
-    let x = 4
-
-  test "addition works":
-    check 2 + 2 == x
-
-  test "division by zero raises":
-    expect(DivByZeroDefect):
-      discard 1 div 0
-```
-
-### Gotchas
-
-- **DO NOT name procs `main`**: Nim treats `main` as a special identifier; it is invisible inside template-generated scopes like `suite`/`test`. Use `run`, `start`, `runApp`, etc. instead.
-- **Export marker `*`**: Needed for symbols to be visible when the module is re-exported. Not required for direct `import mod; mod.proc()` calls, but recommended for public API.
-- `suite`/`test` templates are `{.dirty.}` — they capture the enclosing module scope, but module-qualified names (`mod.proc()`) are safest.
-
-### Running Tests
-
-- `make test` — run test runner that imports all test modules
-- When adding a new test file (`tests/test_feature.nim`), add `import test_feature` to `tests/test_runner.nim`
-- Individual test file: `nim c -r --path:src tests/test_feature.nim`
-
-### Nim Compiler Flags Quick Reference
-
-| Flag | Effect |
-|------|--------|
-| `--out:PATH` | Output binary to PATH |
-| `-d:release` | Release mode (optimizations, runtime checks off) |
-| `-d:debug` | Debug mode (default) |
-| `--path:DIR` | Add DIR to module search path |
-| `-r` | Run after compilation |
-
-### Project Layout Convention
-
-```
-src/             # Source files (.nim), module root
-tests/           # Test files (.nim), import from src/ via config.nims
-tests/config.nims # Nim config for tests (adds src/ to search path)
-tests/test_runner.nim # Imports all test modules, single entry for `make test`
-build/           # Build output directory
-```
