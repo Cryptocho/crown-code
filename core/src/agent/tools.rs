@@ -91,12 +91,12 @@ pub fn get_tool_definitions() -> Vec<Tool> {
     ]
 }
 
-pub fn execute_tool(name: &str, args: &Value) -> String {
+pub async fn execute_tool(name: &str, args: &Value) -> String {
     match name {
         "read_file" => execute_read_file(args),
         "write_to_file" => execute_write_to_file(args),
         "replace_in_file" => execute_replace_in_file(args),
-        "execute_command" => execute_execute_command(args),
+        "execute_command" => execute_execute_command(args).await,
         "search_files" => execute_search_files(args),
         "list_files" => execute_list_files(args),
         "attempt_completion" => execute_attempt_completion(args),
@@ -148,12 +148,12 @@ fn execute_replace_in_file(args: &Value) -> String {
     format!("File updated. {} match(es) replaced.", res.match_count)
 }
 
-fn execute_execute_command(args: &Value) -> String {
+async fn execute_execute_command(args: &Value) -> String {
     let command = args.get("command").and_then(|v| v.as_str()).unwrap_or("");
     if command.is_empty() {
         return "Error: command parameter is required".to_string();
     }
-    let res = crate::command_exec::exec_command(command, &[]);
+    let res = crate::command_exec::exec_command(command, &[]).await;
     let mut output = String::new();
     if !res.stdout.is_empty() {
         output.push_str("STDOUT:\n");
@@ -288,105 +288,105 @@ mod tests {
         assert!(required.iter().any(|r| r.as_str() == Some("content")));
     }
 
-    #[test]
-    fn test_unknown_tool() {
+    #[tokio::test]
+    async fn test_unknown_tool() {
         let args = serde_json::json!({});
-        let result = execute_tool("nonexistent_tool", &args);
+        let result = execute_tool("nonexistent_tool", &args).await;
         assert_eq!(result, "Error: Unknown tool: nonexistent_tool");
     }
 
-    #[test]
-    fn test_read_file_empty_path() {
+    #[tokio::test]
+    async fn test_read_file_empty_path() {
         let args = serde_json::json!({"path": ""});
-        let result = execute_tool("read_file", &args);
+        let result = execute_tool("read_file", &args).await;
         assert_eq!(result, "Error: path parameter is required");
     }
 
-    #[test]
-    fn test_write_to_file_empty_path() {
+    #[tokio::test]
+    async fn test_write_to_file_empty_path() {
         let args = serde_json::json!({"path": "", "content": "test"});
-        let result = execute_tool("write_to_file", &args);
+        let result = execute_tool("write_to_file", &args).await;
         assert_eq!(result, "Error: path parameter is required");
     }
 
-    #[test]
-    fn test_replace_in_file_empty_path() {
+    #[tokio::test]
+    async fn test_replace_in_file_empty_path() {
         let args = serde_json::json!({"path": "", "old_string": "a", "new_string": "b"});
-        let result = execute_tool("replace_in_file", &args);
+        let result = execute_tool("replace_in_file", &args).await;
         assert_eq!(result, "Error: path parameter is required");
     }
 
-    #[test]
-    fn test_replace_in_file_empty_old_string() {
+    #[tokio::test]
+    async fn test_replace_in_file_empty_old_string() {
         let args = serde_json::json!({"path": "/tmp/test.txt", "old_string": "", "new_string": "b"});
-        let result = execute_tool("replace_in_file", &args);
+        let result = execute_tool("replace_in_file", &args).await;
         assert_eq!(result, "Error: old_string parameter is required");
     }
 
-    #[test]
-    fn test_execute_command_empty_command() {
+    #[tokio::test]
+    async fn test_execute_command_empty_command() {
         let args = serde_json::json!({"command": ""});
-        let result = execute_tool("execute_command", &args);
+        let result = execute_tool("execute_command", &args).await;
         assert_eq!(result, "Error: command parameter is required");
     }
 
-    #[test]
-    fn test_search_files_empty_directory() {
+    #[tokio::test]
+    async fn test_search_files_empty_directory() {
         let args = serde_json::json!({"directory": "", "regex": "pattern"});
-        let result = execute_tool("search_files", &args);
+        let result = execute_tool("search_files", &args).await;
         assert_eq!(result, "Error: directory parameter is required");
     }
 
-    #[test]
-    fn test_search_files_empty_regex() {
+    #[tokio::test]
+    async fn test_search_files_empty_regex() {
         let args = serde_json::json!({"directory": "/tmp", "regex": ""});
-        let result = execute_tool("search_files", &args);
+        let result = execute_tool("search_files", &args).await;
         assert_eq!(result, "Error: regex parameter is required");
     }
 
-    #[test]
-    fn test_list_files_empty_path() {
+    #[tokio::test]
+    async fn test_list_files_empty_path() {
         let args = serde_json::json!({"path": ""});
-        let result = execute_tool("list_files", &args);
+        let result = execute_tool("list_files", &args).await;
         assert_eq!(result, "Error: path parameter is required");
     }
 
-    #[test]
-    fn test_execute_command_echo() {
+    #[tokio::test]
+    async fn test_execute_command_echo() {
         let args = serde_json::json!({"command": "echo hello"});
-        let result = execute_tool("execute_command", &args);
+        let result = execute_tool("execute_command", &args).await;
         assert!(result.contains("STDOUT:"));
         assert!(result.contains("hello"));
         assert!(result.contains("Exit code: 0"));
     }
 
-    #[test]
-    fn test_execute_command_stderr() {
+    #[tokio::test]
+    async fn test_execute_command_stderr() {
         let args = serde_json::json!({"command": "echo stderr test >&2"});
-        let result = execute_tool("execute_command", &args);
+        let result = execute_tool("execute_command", &args).await;
         assert!(result.contains("STDERR:"));
         assert!(result.contains("stderr test"));
         assert!(result.contains("Exit code: 0"));
     }
 
-    #[test]
-    fn test_execute_command_exit_code() {
+    #[tokio::test]
+    async fn test_execute_command_exit_code() {
         let args = serde_json::json!({"command": "false"});
-        let result = execute_tool("execute_command", &args);
+        let result = execute_tool("execute_command", &args).await;
         assert!(result.contains("Exit code: 1"));
     }
 
-    #[test]
-    fn test_attempt_completion_mark() {
+    #[tokio::test]
+    async fn test_attempt_completion_mark() {
         let args = serde_json::json!({"result": "Task done"});
-        let result = execute_tool("attempt_completion", &args);
+        let result = execute_tool("attempt_completion", &args).await;
         assert_eq!(result, "[COMPLETION]Task done");
     }
 
-    #[test]
-    fn test_attempt_completion_empty_result() {
+    #[tokio::test]
+    async fn test_attempt_completion_empty_result() {
         let args = serde_json::json!({"result": ""});
-        let result = execute_tool("attempt_completion", &args);
+        let result = execute_tool("attempt_completion", &args).await;
         assert_eq!(result, "[COMPLETION]");
     }
 
@@ -443,84 +443,84 @@ mod tests {
         assert!(props.contains_key("path"));
     }
 
-    #[test]
-    fn test_read_file_integration() {
+    #[tokio::test]
+    async fn test_read_file_integration() {
         let dir = std::env::temp_dir().join("crown_test_read_file");
         let _ = std::fs::create_dir_all(&dir);
         let file_path = dir.join("test_read.txt");
         std::fs::write(&file_path, "line1\nline2\nline3\n").unwrap();
         let path_str = file_path.to_string_lossy().to_string();
         let args = serde_json::json!({"path": path_str});
-        let result = execute_tool("read_file", &args);
+        let result = execute_tool("read_file", &args).await;
         assert!(result.contains("1 | line1"));
         assert!(result.contains("2 | line2"));
         assert!(result.contains("3 | line3"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    #[test]
-    fn test_write_to_file_integration() {
+    #[tokio::test]
+    async fn test_write_to_file_integration() {
         let dir = std::env::temp_dir().join("crown_test_write_file");
         let _ = std::fs::create_dir_all(&dir);
         let file_path = dir.join("test_write.txt");
         let path_str = file_path.to_string_lossy().to_string();
         let args = serde_json::json!({"path": path_str, "content": "hello world"});
-        let result = execute_tool("write_to_file", &args);
+        let result = execute_tool("write_to_file", &args).await;
         assert_eq!(result, "File written successfully.");
         let content = std::fs::read_to_string(&file_path).unwrap_or_default();
         assert_eq!(content, "hello world");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    #[test]
-    fn test_list_files_integration() {
+    #[tokio::test]
+    async fn test_list_files_integration() {
         let dir = std::env::temp_dir().join("crown_test_list_files");
         let _ = std::fs::create_dir_all(&dir);
         std::fs::write(dir.join("a.txt"), "a").unwrap();
         std::fs::write(dir.join("b.txt"), "b").unwrap();
         let dir_str = dir.to_string_lossy().to_string();
         let args = serde_json::json!({"path": dir_str});
-        let result = execute_tool("list_files", &args);
+        let result = execute_tool("list_files", &args).await;
         assert!(result.contains("a.txt"));
         assert!(result.contains("b.txt"));
         assert!(result.contains("2 entries"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    #[test]
-    fn test_search_files_finds_pattern() {
+    #[tokio::test]
+    async fn test_search_files_finds_pattern() {
         let dir = std::env::temp_dir().join("crown_test_search_files");
         let _ = std::fs::create_dir_all(&dir);
         std::fs::write(dir.join("test.nim"), "proc hello =\n  echo \"hello\"\n").unwrap();
         let dir_str = dir.to_string_lossy().to_string();
         let args = serde_json::json!({"directory": dir_str, "regex": "hello", "file_pattern": "*"});
-        let result = execute_tool("search_files", &args);
+        let result = execute_tool("search_files", &args).await;
         assert!(result.contains("hello"));
         assert!(result.contains("matches found"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    #[test]
-    fn test_search_files_no_matches() {
+    #[tokio::test]
+    async fn test_search_files_no_matches() {
         let dir = std::env::temp_dir().join("crown_test_search_nomatch");
         let _ = std::fs::create_dir_all(&dir);
         std::fs::write(dir.join("test.txt"), "hello world").unwrap();
         let dir_str = dir.to_string_lossy().to_string();
         let args = serde_json::json!({"directory": dir_str, "regex": "zzz_not_found", "file_pattern": "*"});
-        let result = execute_tool("search_files", &args);
+        let result = execute_tool("search_files", &args).await;
         assert_eq!(result, "No matches found.");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    #[test]
-    fn test_replace_in_file_edits_content() {
+    #[tokio::test]
+    async fn test_replace_in_file_edits_content() {
         let dir = std::env::temp_dir().join("crown_test_replace_file");
         let _ = std::fs::create_dir_all(&dir);
         let file_path = dir.join("test_replace.txt");
         std::fs::write(&file_path, "old line\nkeep line\n").unwrap();
         let path_str = file_path.to_string_lossy().to_string();
         let args = serde_json::json!({"path": path_str, "old_string": "old line", "new_string": "new line"});
-        let result = execute_tool("replace_in_file", &args);
+        let result = execute_tool("replace_in_file", &args).await;
         assert!(result.contains("File updated"));
         assert!(result.contains("match(es) replaced"));
         let content = std::fs::read_to_string(&file_path).unwrap_or_default();
@@ -529,22 +529,22 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    #[test]
-    fn test_replace_in_file_nonexistent_file() {
+    #[tokio::test]
+    async fn test_replace_in_file_nonexistent_file() {
         let args = serde_json::json!({"path": "/tmp/crown_test_nonexistent_file_xyz.txt", "old_string": "a", "new_string": "b"});
-        let result = execute_tool("replace_in_file", &args);
+        let result = execute_tool("replace_in_file", &args).await;
         assert!(result.contains("Error:"));
     }
 
-    #[test]
-    fn test_replace_in_file_non_matching_old_string() {
+    #[tokio::test]
+    async fn test_replace_in_file_non_matching_old_string() {
         let dir = std::env::temp_dir().join("crown_test_replace_nomatch");
         let _ = std::fs::create_dir_all(&dir);
         let file_path = dir.join("test_nomatch.txt");
         std::fs::write(&file_path, "existing content\n").unwrap();
         let path_str = file_path.to_string_lossy().to_string();
         let args = serde_json::json!({"path": path_str, "old_string": "nonexistent line", "new_string": "new"});
-        let result = execute_tool("replace_in_file", &args);
+        let result = execute_tool("replace_in_file", &args).await;
         assert!(result.contains("Error:"));
         let _ = std::fs::remove_dir_all(&dir);
     }

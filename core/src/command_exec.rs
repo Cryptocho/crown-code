@@ -1,8 +1,10 @@
-use std::io::{BufRead, BufReader};
-use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
+use tokio::io::{AsyncBufReadExt, BufReader as TokioBufReader};
+use tokio::process::Command;
+use std::process::Stdio;
 
 use crate::shell_detect::detect_shells;
 
@@ -133,7 +135,7 @@ pub fn requires_approval(_command: &str) -> bool {
     true
 }
 
-pub fn exec_command(command: &str, blacklist: &[&str]) -> CommandResult {
+pub async fn exec_command(command: &str, blacklist: &[&str]) -> CommandResult {
     let trimmed = trim_whitespace(command);
     if trimmed.is_empty() {
         return CommandResult {
@@ -222,14 +224,17 @@ pub fn exec_command(command: &str, blacklist: &[&str]) -> CommandResult {
 
     let out_buf_clone = out_buf.clone();
     let total_out_clone = total_out_size.clone();
-    let out_thread = std::thread::spawn(move || {
-        let reader = BufReader::new(stdout);
-        for line in reader.lines() {
-            match line {
-                Ok(l) => {
+    let out_task = tokio::spawn(async move {
+        let mut reader = TokioBufReader::new(stdout);
+        let mut line = String::new();
+        loop {
+            line.clear();
+            match reader.read_line(&mut line).await {
+                Ok(0) => break,
+                Ok(_) => {
                     if total_out_clone.load(Ordering::Relaxed) < MAX_FULL_OUTPUT_SIZE {
-                        out_buf_clone.push(&l);
-                        total_out_clone.fetch_add(l.len() + 1, Ordering::Relaxed);
+                        out_buf_clone.push(&line);
+                        total_out_clone.fetch_add(line.len() + 1, Ordering::Relaxed);
                     }
                 }
                 Err(_) => break,
@@ -239,14 +244,17 @@ pub fn exec_command(command: &str, blacklist: &[&str]) -> CommandResult {
 
     let err_buf_clone = err_buf.clone();
     let total_err_clone = total_err_size.clone();
-    let err_thread = std::thread::spawn(move || {
-        let reader = BufReader::new(stderr);
-        for line in reader.lines() {
-            match line {
-                Ok(l) => {
+    let err_task = tokio::spawn(async move {
+        let mut reader = TokioBufReader::new(stderr);
+        let mut line = String::new();
+        loop {
+            line.clear();
+            match reader.read_line(&mut line).await {
+                Ok(0) => break,
+                Ok(_) => {
                     if total_err_clone.load(Ordering::Relaxed) < MAX_FULL_OUTPUT_SIZE {
-                        err_buf_clone.push(&l);
-                        total_err_clone.fetch_add(l.len() + 1, Ordering::Relaxed);
+                        err_buf_clone.push(&line);
+                        total_err_clone.fetch_add(line.len() + 1, Ordering::Relaxed);
                     }
                 }
                 Err(_) => break,
@@ -257,33 +265,28 @@ pub fn exec_command(command: &str, blacklist: &[&str]) -> CommandResult {
     let mut exit_code = -1;
     let mut timed_out = false;
 
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                exit_code = status.code().unwrap_or(-1);
-                break;
-            }
-            Ok(None) => {
-                if start_time.elapsed().as_millis() as u64 >= DEFAULT_TIMEOUT_MS {
-                    timed_out = true;
-                    break;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(10));
-            }
-            Err(_) => {
-                exit_code = -1;
-                break;
-            }
+    let result = tokio::time::timeout(
+        Duration::from_millis(DEFAULT_TIMEOUT_MS),
+        child.wait(),
+    )
+    .await;
+
+    match result {
+        Ok(Ok(status)) => {
+            exit_code = status.code().unwrap_or(-1);
+        }
+        Ok(Err(_)) => {
+            exit_code = -1;
+        }
+        Err(_) => {
+            timed_out = true;
+            let _ = child.kill().await;
+            let _ = child.wait().await;
         }
     }
 
-    if timed_out {
-        let _ = child.kill();
-        let _ = child.wait();
-    }
-
-    out_thread.join().ok();
-    err_thread.join().ok();
+    out_task.await.ok();
+    err_task.await.ok();
 
     let execution_time = start_time.elapsed().as_secs_f64();
 
@@ -427,50 +430,50 @@ mod tests {
         assert_eq!(cb.join(), "");
     }
 
-    #[test]
-    fn test_exec_command_echo() {
-        let result = exec_command("echo hello", &[]);
+    #[tokio::test]
+    async fn test_exec_command_echo() {
+        let result = exec_command("echo hello", &[]).await;
         assert_eq!(result.error, CommandError::Ok);
         assert_eq!(result.exit_code, 0);
         assert_eq!(result.stdout.trim(), "hello");
     }
 
-    #[test]
-    fn test_exec_command_exit_code() {
-        let result = exec_command("bash -c 'exit 42'", &[]);
+    #[tokio::test]
+    async fn test_exec_command_exit_code() {
+        let result = exec_command("bash -c 'exit 42'", &[]).await;
         assert_eq!(result.exit_code, 42);
         assert_eq!(result.error, CommandError::ExecutionFailed);
     }
 
-    #[test]
-    fn test_exec_command_stderr() {
-        let result = exec_command("bash -c 'echo error >&2'", &[]);
+    #[tokio::test]
+    async fn test_exec_command_stderr() {
+        let result = exec_command("bash -c 'echo error >&2'", &[]).await;
         assert_eq!(result.error, CommandError::Ok);
         assert_eq!(result.exit_code, 0);
         assert_eq!(result.stderr.trim(), "error");
     }
 
-    #[test]
-    fn test_exec_command_empty() {
-        let result = exec_command("", &[]);
+    #[tokio::test]
+    async fn test_exec_command_empty() {
+        let result = exec_command("", &[]).await;
         assert_eq!(result.error, CommandError::ExecutionFailed);
     }
 
-    #[test]
-    fn test_exec_command_whitespace() {
-        let result = exec_command("   \t   ", &[]);
+    #[tokio::test]
+    async fn test_exec_command_whitespace() {
+        let result = exec_command("   \t   ", &[]).await;
         assert_eq!(result.error, CommandError::ExecutionFailed);
     }
 
-    #[test]
-    fn test_exec_command_execution_time() {
-        let result = exec_command("echo hello", &[]);
+    #[tokio::test]
+    async fn test_exec_command_execution_time() {
+        let result = exec_command("echo hello", &[]).await;
         assert!(result.execution_time > 0.0);
     }
 
-    #[test]
-    fn test_exec_command_not_found() {
-        let result = exec_command("nonexistent_command_xyz123", &[]);
+    #[tokio::test]
+    async fn test_exec_command_not_found() {
+        let result = exec_command("nonexistent_command_xyz123", &[]).await;
         assert_eq!(result.error, CommandError::ExecutionFailed);
     }
 }

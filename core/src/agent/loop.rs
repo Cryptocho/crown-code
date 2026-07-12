@@ -5,7 +5,7 @@ use crate::agent::tools::{execute_tool, get_tool_definitions};
 use crate::api::openai::{create_message_stream, new_client};
 use crate::api::types::*;
 
-pub fn run_agent_loop(config: ApiClientConfig) {
+pub async fn run_agent_loop(config: ApiClientConfig) {
     let mut client = new_client(config);
     let tools = get_tool_definitions();
     let cwd = std::env::current_dir()
@@ -73,7 +73,7 @@ pub fn run_agent_loop(config: ApiClientConfig) {
                     ApiStreamChunk::ToolCall(_) => {}
                 }
                 true
-            });
+            }).await;
 
             if !resp.error.message.is_empty() {
                 println!("\n[API Error] {}", resp.error.message);
@@ -122,7 +122,7 @@ pub fn run_agent_loop(config: ApiClientConfig) {
                     }
                 };
 
-                let result = execute_tool(&tc.function_name, &args);
+                let result = execute_tool(&tc.function_name, &args).await;
 
                 eprintln!("[TOOL_RESULT] {}:\n{}\n---", tc.function_name, result);
 

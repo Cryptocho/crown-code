@@ -20,14 +20,14 @@ pub struct HttpResponse {
 pub struct HttpTransport {
     pub base_url: String,
     pub bearer_token: String,
-    client: reqwest::blocking::Client,
+    client: reqwest::Client,
     pub connected: bool,
     pub last_error: String,
 }
 
 impl HttpTransport {
     pub fn new(url: &str, bearer_token: &str) -> Self {
-        let client = reqwest::blocking::Client::builder()
+        let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(SSE_READ_TIMEOUT_MS / 1000))
             .build()
             .expect("failed to build reqwest client");
@@ -49,7 +49,7 @@ impl HttpTransport {
         self.connected = false;
     }
 
-    pub fn post_json(&mut self, json_body: &str) -> HttpResponse {
+    pub async fn post_json(&mut self, json_body: &str) -> HttpResponse {
         let response = match self
             .client
             .post(&self.base_url)
@@ -57,6 +57,7 @@ impl HttpTransport {
             .header("Accept", "application/json, text/event-stream")
             .body(json_body.to_string())
             .send()
+            .await
         {
             Ok(r) => r,
             Err(e) => {
@@ -86,7 +87,7 @@ impl HttpTransport {
         let content_type = headers.get("content-type").cloned().unwrap_or_default();
 
         if content_type.starts_with("text/event-stream") {
-            let bytes = match response.bytes() {
+            let bytes = match response.bytes().await {
                 Ok(b) => b,
                 Err(e) => {
                     return HttpResponse {
@@ -113,7 +114,7 @@ impl HttpTransport {
             };
         }
 
-        let body = match response.text() {
+        let body = match response.text().await {
             Ok(b) => b,
             Err(e) => {
                 return HttpResponse {
@@ -135,7 +136,7 @@ impl HttpTransport {
         }
     }
 
-    pub fn post_json_stream(
+    pub async fn post_json_stream(
         &mut self,
         json_body: &str,
         mut on_event: impl FnMut(SseEvent) -> bool,
@@ -147,6 +148,7 @@ impl HttpTransport {
             .header("Accept", "text/event-stream")
             .body(json_body.to_string())
             .send()
+            .await
         {
             Ok(r) => r,
             Err(e) => {
@@ -171,7 +173,7 @@ impl HttpTransport {
         }
 
         let mut parser = SseParser::new();
-        match response.bytes() {
+        match response.bytes().await {
             Ok(bytes) => {
                 let chunk = String::from_utf8_lossy(&bytes);
                 for evt in parser.feed(&chunk) {
@@ -214,18 +216,18 @@ mod tests {
         assert!(!t.is_connected());
     }
 
-    #[test]
-    fn test_post_json_connection_refused() {
+    #[tokio::test]
+    async fn test_post_json_connection_refused() {
         let mut t = HttpTransport::new("http://127.0.0.1:1", "token");
-        let result = t.post_json(r#"{"jsonrpc":"2.0","method":"ping"}"#);
+        let result = t.post_json(r#"{"jsonrpc":"2.0","method":"ping"}"#).await;
         assert_eq!(result.status_code, 0);
         assert!(!result.error.is_empty());
     }
 
-    #[test]
-    fn test_post_json_stream_connection_refused() {
+    #[tokio::test]
+    async fn test_post_json_stream_connection_refused() {
         let mut t = HttpTransport::new("http://127.0.0.1:1", "token");
-        let (status, error) = t.post_json_stream(r#"{"jsonrpc":"2.0","method":"ping"}"#, |_| true);
+        let (status, error) = t.post_json_stream(r#"{"jsonrpc":"2.0","method":"ping"}"#, |_| true).await;
         assert_eq!(status, 0);
         assert!(!error.is_empty());
     }

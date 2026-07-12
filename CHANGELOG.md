@@ -1,5 +1,29 @@
 # Changelog
 
+## 核心异步运行时迁移
+
+### Architecture
+- `core/Cargo.toml`：移除 `libc` 依赖，移除 `reqwest` 的 `blocking` feature，新增 `tokio`（6 features：rt-multi-thread/net/io-util/sync/macros/process）和 `interprocess`（Phase 1.4 预备）依赖
+- `core/src/main.rs`：入口改为 `#[tokio::main] async fn main()`
+- `core/src/mcp/transport_http.rs`：`reqwest::blocking::Client` → `reqwest::Client`（async），`post_json`/`post_json_stream` 变为 `async fn`
+- `core/src/mcp/transport_stdio.rs`：`std::process` → `tokio::process`，`libc::poll` → `tokio::time::timeout`，`std::thread` → `tokio::spawn`，所有 I/O 方法变为 `async fn`
+- `core/src/command_exec.rs`：`std::process::Command` → `tokio::process::Command`，`std::thread::spawn` → `tokio::spawn`，`try_wait` 轮询 → `tokio::time::timeout` + `child.wait()`，`exec_command` 变为 `async fn`
+- `core/src/api/openai.rs`：`create_message`/`create_message_stream` 变为 `async fn`
+- `core/src/mcp/client.rs`：3 个 Mutex（stdio/http/transport_lock）改为 `tokio::sync::Mutex`（跨 await 持有），其余 4 个保持 `std::sync::Mutex`（短暂访问）；`send_json_rpc`/`send_notification`/`initialize`/`reconnect`/`call_tool`/`list_tools`/`destroy`/`new` 变为 `async fn`；心跳改 `tokio::spawn`，`JoinHandle<()>` 替代 `thread::JoinHandle<()>`
+- `core/src/mcp/registry.rs`：`destroy`/`get_client` 变为 `async fn`
+- `core/src/agent/tools.rs`：`execute_tool`/`execute_execute_command` 变为 `async fn`
+- `core/src/agent/loop.rs`：`run_agent_loop` 变为 `async fn`
+
+### Bug Fixes
+- `core/src/mcp/transport_stdio.rs`：`close()` 缺少 `child.wait().await` 回收子进程，修复僵尸进程泄漏
+
+### Refactored
+- 全部 451 个测试通过，约 90 个测试从 `#[test]` 改为 `#[tokio::test]`
+- 纯 CPU 模块（sse/jsonrpc/glob/search/xdiff/formatter/pathutils 等）保持同步不变
+- `mock_mcp_server.rs` 独立进程保持不变
+
+- Affected files: `core/Cargo.toml`, `core/src/main.rs`, `core/src/mcp/transport_http.rs`, `core/src/mcp/transport_stdio.rs`, `core/src/command_exec.rs`, `core/src/api/openai.rs`, `core/src/mcp/client.rs`, `core/src/mcp/registry.rs`, `core/src/agent/tools.rs`, `core/src/agent/loop.rs`
+
 ## Agent Loop 核心模块
 
 ### Added

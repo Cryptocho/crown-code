@@ -66,13 +66,13 @@ impl McpRegistry {
         }
     }
 
-    pub fn destroy(&mut self) {
+    pub async fn destroy(&mut self) {
         if self.destroyed {
             return;
         }
         self.destroyed = true;
         for (_, mut client) in self.clients.drain() {
-            client.destroy();
+            client.destroy().await;
         }
         let mut inner = self.inner.lock().unwrap();
         inner.configs.clear();
@@ -201,7 +201,7 @@ impl McpRegistry {
         McpRegistryError::Ok
     }
 
-    pub fn get_client(&mut self, name: &str) -> Option<&McpClient> {
+    pub async fn get_client(&mut self, name: &str) -> Option<&McpClient> {
         if self.destroyed {
             return None;
         }
@@ -267,7 +267,7 @@ impl McpRegistry {
             ..Default::default()
         };
 
-        let client = match McpClient::new(client_config) {
+        let client = match McpClient::new(client_config).await {
             Ok(c) => c,
             Err(_) => return None,
         };
@@ -326,55 +326,53 @@ mod tests {
     mod nil_safety {
         use super::*;
 
-        #[test]
-        fn test_destroy_on_empty_registry() {
+        #[tokio::test]
+        async fn test_destroy_on_empty_registry() {
             let mut reg = McpRegistry::new();
-            reg.destroy();
-            // no panic
+            reg.destroy().await;
         }
 
-        #[test]
-        fn test_load_json_config_after_destroy() {
+        #[tokio::test]
+        async fn test_load_json_config_after_destroy() {
             let mut reg = McpRegistry::new();
-            reg.destroy();
+            reg.destroy().await;
             let result =
                 reg.load_json_config(r#"{"servers": {"srv": {"command": "/bin/echo"}}}"#);
             assert_eq!(result, McpRegistryError::ConfigError);
         }
 
-        #[test]
-        fn test_get_client_after_destroy() {
+        #[tokio::test]
+        async fn test_get_client_after_destroy() {
             let mut reg = McpRegistry::new();
-            reg.destroy();
-            assert!(reg.get_client("test").is_none());
+            reg.destroy().await;
+            assert!(reg.get_client("test").await.is_none());
         }
 
-        #[test]
-        fn test_server_count_after_destroy() {
+        #[tokio::test]
+        async fn test_server_count_after_destroy() {
             let mut reg = McpRegistry::new();
-            reg.destroy();
+            reg.destroy().await;
             assert_eq!(reg.server_count(), 0);
         }
 
-        #[test]
-        fn test_get_last_error_after_destroy() {
+        #[tokio::test]
+        async fn test_get_last_error_after_destroy() {
             let mut reg = McpRegistry::new();
-            reg.destroy();
+            reg.destroy().await;
             assert_eq!(reg.last_error(), "null registry");
         }
 
-        #[test]
-        fn test_set_status_callback_after_destroy() {
+        #[tokio::test]
+        async fn test_set_status_callback_after_destroy() {
             let mut reg = McpRegistry::new();
-            reg.destroy();
+            reg.destroy().await;
             reg.set_status_callback(Box::new(|_, _, _| {}));
-            // no panic
         }
 
-        #[test]
-        fn test_server_names_after_destroy() {
+        #[tokio::test]
+        async fn test_server_names_after_destroy() {
             let mut reg = McpRegistry::new();
-            reg.destroy();
+            reg.destroy().await;
             assert!(reg.server_names().is_empty());
         }
     }
@@ -382,28 +380,28 @@ mod tests {
     mod config_parsing {
         use super::*;
 
-        #[test]
-        fn test_valid_json_with_stdio_server() {
+        #[tokio::test]
+        async fn test_valid_json_with_stdio_server() {
             let mut reg = McpRegistry::new();
             let json_str = r#"{"servers": {"my-server": {"transport": "stdio", "command": "/path/to/server", "args": ["--flag"]}}}"#;
             assert_eq!(reg.load_json_config(json_str), McpRegistryError::Ok);
             let names = reg.server_names();
             assert_eq!(names, vec!["my-server"]);
-            reg.destroy();
+            reg.destroy().await;
         }
 
-        #[test]
-        fn test_valid_json_with_http_server() {
+        #[tokio::test]
+        async fn test_valid_json_with_http_server() {
             let mut reg = McpRegistry::new();
             let json_str = r#"{"servers": {"http-server": {"transport": "http", "url": "https://example.com/mcp", "authToken": "token123"}}}"#;
             assert_eq!(reg.load_json_config(json_str), McpRegistryError::Ok);
             let names = reg.server_names();
             assert_eq!(names, vec!["http-server"]);
-            reg.destroy();
+            reg.destroy().await;
         }
 
-        #[test]
-        fn test_valid_json_with_both() {
+        #[tokio::test]
+        async fn test_valid_json_with_both() {
             let mut reg = McpRegistry::new();
             let json_str = r#"{"servers": {"stdio-srv": {"transport": "stdio", "command": "/bin/echo"}, "http-srv": {"transport": "http", "url": "https://example.com/mcp"}}}"#;
             assert_eq!(reg.load_json_config(json_str), McpRegistryError::Ok);
@@ -411,30 +409,30 @@ mod tests {
             assert_eq!(names.len(), 2);
             assert!(names.contains(&"stdio-srv".to_string()));
             assert!(names.contains(&"http-srv".to_string()));
-            reg.destroy();
+            reg.destroy().await;
         }
 
-        #[test]
-        fn test_invalid_json_string() {
+        #[tokio::test]
+        async fn test_invalid_json_string() {
             let mut reg = McpRegistry::new();
             assert_eq!(reg.load_json_config("{invalid"), McpRegistryError::ConfigError);
             assert!(!reg.last_error().is_empty());
-            reg.destroy();
+            reg.destroy().await;
         }
 
-        #[test]
-        fn test_missing_servers_field() {
+        #[tokio::test]
+        async fn test_missing_servers_field() {
             let mut reg = McpRegistry::new();
             assert_eq!(
                 reg.load_json_config(r#"{"other": {}}"#),
                 McpRegistryError::ConfigError
             );
             assert!(reg.last_error().contains("servers"));
-            reg.destroy();
+            reg.destroy().await;
         }
 
-        #[test]
-        fn test_stdio_missing_command() {
+        #[tokio::test]
+        async fn test_stdio_missing_command() {
             let mut reg = McpRegistry::new();
             let json_str = r#"{"servers": {"no-cmd": {"transport": "stdio"}}}"#;
             assert_eq!(
@@ -442,11 +440,11 @@ mod tests {
                 McpRegistryError::ConfigError
             );
             assert!(reg.last_error().contains("command"));
-            reg.destroy();
+            reg.destroy().await;
         }
 
-        #[test]
-        fn test_http_missing_url() {
+        #[tokio::test]
+        async fn test_http_missing_url() {
             let mut reg = McpRegistry::new();
             let json_str = r#"{"servers": {"no-url": {"transport": "http"}}}"#;
             assert_eq!(
@@ -454,11 +452,11 @@ mod tests {
                 McpRegistryError::ConfigError
             );
             assert!(reg.last_error().contains("url"));
-            reg.destroy();
+            reg.destroy().await;
         }
 
-        #[test]
-        fn test_unknown_transport_value() {
+        #[tokio::test]
+        async fn test_unknown_transport_value() {
             let mut reg = McpRegistry::new();
             let json_str = r#"{"servers": {"bad": {"transport": "ws"}}}"#;
             assert_eq!(
@@ -466,11 +464,11 @@ mod tests {
                 McpRegistryError::ConfigError
             );
             assert!(reg.last_error().contains("transport"));
-            reg.destroy();
+            reg.destroy().await;
         }
 
-        #[test]
-        fn test_empty_server_name() {
+        #[tokio::test]
+        async fn test_empty_server_name() {
             let mut reg = McpRegistry::new();
             let json_str = r#"{"servers": {"": {"transport": "stdio", "command": "/bin/echo"}}}"#;
             assert_eq!(
@@ -478,11 +476,11 @@ mod tests {
                 McpRegistryError::ConfigError
             );
             assert!(reg.last_error().contains("empty server"));
-            reg.destroy();
+            reg.destroy().await;
         }
 
-        #[test]
-        fn test_enabled_false_parsed_correctly() {
+        #[tokio::test]
+        async fn test_enabled_false_parsed_correctly() {
             let mut reg = McpRegistry::new();
             let json_str = r#"{"servers": {"disabled-srv": {"transport": "stdio", "command": "/bin/echo", "enabled": false}}}"#;
             assert_eq!(reg.load_json_config(json_str), McpRegistryError::Ok);
@@ -491,11 +489,11 @@ mod tests {
                 inner.configs["disabled-srv"].enabled
             };
             assert!(!enabled);
-            reg.destroy();
+            reg.destroy().await;
         }
 
-        #[test]
-        fn test_enabled_defaults_to_true() {
+        #[tokio::test]
+        async fn test_enabled_defaults_to_true() {
             let mut reg = McpRegistry::new();
             let json_str = r#"{"servers": {"default-srv": {"transport": "stdio", "command": "/bin/echo"}}}"#;
             assert_eq!(reg.load_json_config(json_str), McpRegistryError::Ok);
@@ -504,15 +502,15 @@ mod tests {
                 inner.configs["default-srv"].enabled
             };
             assert!(enabled);
-            reg.destroy();
+            reg.destroy().await;
         }
     }
 
     mod server_names {
         use super::*;
 
-        #[test]
-        fn test_get_server_names_returns_correct_list() {
+        #[tokio::test]
+        async fn test_get_server_names_returns_correct_list() {
             let mut reg = McpRegistry::new();
             let json_str = r#"{"servers": {"c": {"command": "/bin/c"}, "a": {"command": "/bin/a"}, "b": {"command": "/bin/b"}}}"#;
             assert_eq!(reg.load_json_config(json_str), McpRegistryError::Ok);
@@ -521,7 +519,7 @@ mod tests {
             assert!(names.contains(&"a".to_string()));
             assert!(names.contains(&"b".to_string()));
             assert!(names.contains(&"c".to_string()));
-            reg.destroy();
+            reg.destroy().await;
         }
 
         #[test]
@@ -540,41 +538,41 @@ mod tests {
             assert_eq!(reg.server_count(), 0);
         }
 
-        #[test]
-        fn test_after_load_json_config_returns_zero() {
+        #[tokio::test]
+        async fn test_after_load_json_config_returns_zero() {
             let mut reg = McpRegistry::new();
             let json_str = r#"{"servers": {"a": {"command": "/bin/a"}, "b": {"command": "/bin/b"}}}"#;
             assert_eq!(reg.load_json_config(json_str), McpRegistryError::Ok);
             assert_eq!(reg.server_count(), 0);
-            reg.destroy();
+            reg.destroy().await;
         }
     }
 
     mod get_client {
         use super::*;
 
-        #[test]
-        fn test_unknown_server_returns_none() {
+        #[tokio::test]
+        async fn test_unknown_server_returns_none() {
             let mut reg = McpRegistry::new();
             let json_str = r#"{"servers": {"known": {"command": "/bin/echo"}}}"#;
             assert_eq!(reg.load_json_config(json_str), McpRegistryError::Ok);
-            assert!(reg.get_client("unknown").is_none());
+            assert!(reg.get_client("unknown").await.is_none());
             assert!(reg.last_error().contains("not found"));
-            reg.destroy();
+            reg.destroy().await;
         }
 
-        #[test]
-        fn test_disabled_server_returns_none() {
+        #[tokio::test]
+        async fn test_disabled_server_returns_none() {
             let mut reg = McpRegistry::new();
             let json_str = r#"{"servers": {"disabled-srv": {"command": "/bin/echo", "enabled": false}}}"#;
             assert_eq!(reg.load_json_config(json_str), McpRegistryError::Ok);
-            assert!(reg.get_client("disabled-srv").is_none());
+            assert!(reg.get_client("disabled-srv").await.is_none());
             assert!(reg.last_error().contains("disabled"));
-            reg.destroy();
+            reg.destroy().await;
         }
 
-        #[test]
-        fn test_normal_stdio_server_connection() {
+        #[tokio::test]
+        async fn test_normal_stdio_server_connection() {
             let path = match mock_server_path() {
                 Some(p) => p,
                 None => return,
@@ -585,14 +583,14 @@ mod tests {
                 path
             );
             assert_eq!(reg.load_json_config(&json_str), McpRegistryError::Ok);
-            let client = reg.get_client("mock");
+            let client = reg.get_client("mock").await;
             assert!(client.is_some());
             assert_eq!(client.unwrap().state(), McpConnectionState::Connected);
-            reg.destroy();
+            reg.destroy().await;
         }
 
-        #[test]
-        fn test_repeated_get_client_returns_same_instance() {
+        #[tokio::test]
+        async fn test_repeated_get_client_returns_same_instance() {
             let path = match mock_server_path() {
                 Some(p) => p,
                 None => return,
@@ -603,45 +601,45 @@ mod tests {
                 path
             );
             assert_eq!(reg.load_json_config(&json_str), McpRegistryError::Ok);
-            let c1 = reg.get_client("mock").unwrap() as *const McpClient;
-            let c2 = reg.get_client("mock").unwrap() as *const McpClient;
+            let c1 = reg.get_client("mock").await.unwrap() as *const McpClient;
+            let c2 = reg.get_client("mock").await.unwrap() as *const McpClient;
             assert_eq!(c1, c2);
-            reg.destroy();
+            reg.destroy().await;
         }
     }
 
     mod status_callback {
         use super::*;
 
-        #[test]
-        fn test_set_status_callback_does_not_crash() {
+        #[tokio::test]
+        async fn test_set_status_callback_does_not_crash() {
             let mut reg = McpRegistry::new();
             reg.set_status_callback(Box::new(|_, _, _| {}));
-            reg.destroy();
+            reg.destroy().await;
         }
     }
 
     mod error_handling {
         use super::*;
 
-        #[test]
-        fn test_get_last_error_returns_correct_message() {
+        #[tokio::test]
+        async fn test_get_last_error_returns_correct_message() {
             let mut reg = McpRegistry::new();
             let json_str = r#"{"servers": {"known": {"command": "/bin/echo"}}}"#;
             assert_eq!(reg.load_json_config(json_str), McpRegistryError::Ok);
-            let _ = reg.get_client("unknown");
+            let _ = reg.get_client("unknown").await;
             let err = reg.last_error();
             assert!(!err.is_empty());
             assert!(err.contains("not found"));
-            reg.destroy();
+            reg.destroy().await;
         }
     }
 
     mod lifecycle {
         use super::*;
 
-        #[test]
-        fn test_destroy_cleans_up_clients() {
+        #[tokio::test]
+        async fn test_destroy_cleans_up_clients() {
             let path = match mock_server_path() {
                 Some(p) => p,
                 None => return,
@@ -652,14 +650,14 @@ mod tests {
                 path
             );
             assert_eq!(reg.load_json_config(&json_str), McpRegistryError::Ok);
-            let _ = reg.get_client("mock");
+            let _ = reg.get_client("mock").await;
             assert_eq!(reg.server_count(), 1);
-            reg.destroy();
+            reg.destroy().await;
             assert_eq!(reg.server_count(), 0);
         }
 
-        #[test]
-        fn test_get_client_after_destroy_returns_none() {
+        #[tokio::test]
+        async fn test_get_client_after_destroy_returns_none() {
             let path = match mock_server_path() {
                 Some(p) => p,
                 None => return,
@@ -670,9 +668,9 @@ mod tests {
                 path
             );
             assert_eq!(reg.load_json_config(&json_str), McpRegistryError::Ok);
-            let _ = reg.get_client("mock");
-            reg.destroy();
-            assert!(reg.get_client("mock").is_none());
+            let _ = reg.get_client("mock").await;
+            reg.destroy().await;
+            assert!(reg.get_client("mock").await.is_none());
         }
     }
 }

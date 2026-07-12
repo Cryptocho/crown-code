@@ -160,9 +160,9 @@ pub fn parse_chat_response(body: &str) -> ApiResponse {
     }
 }
 
-pub fn create_message(client: &mut ApiClient, messages: &[Message], tools: &[Tool]) -> ApiResponse {
+pub async fn create_message(client: &mut ApiClient, messages: &[Message], tools: &[Tool]) -> ApiResponse {
     let req_body = build_chat_request(client, messages, tools);
-    let http_resp = client.http.post_json(&req_body.to_string());
+    let http_resp = client.http.post_json(&req_body.to_string()).await;
     if http_resp.status_code == 0 {
         return ApiResponse {
             error: ApiError {
@@ -271,7 +271,7 @@ pub fn parse_stream_event(data: &str) -> Vec<ApiStreamChunk> {
     vec![ApiStreamChunk::Text(String::new())]
 }
 
-pub fn create_message_stream(
+pub async fn create_message_stream(
     client: &mut ApiClient,
     messages: &[Message],
     tools: &[Tool],
@@ -349,7 +349,7 @@ pub fn create_message_stream(
             true
         };
 
-        let (status_code, err_msg) = client.http.post_json_stream(&req_body.to_string(), &mut on_event);
+        let (status_code, err_msg) = client.http.post_json_stream(&req_body.to_string(), &mut on_event).await;
         if status_code != 200 {
             return ApiResponse {
                 error: ApiError {
@@ -895,8 +895,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_real_api_non_streaming_text() {
+    #[tokio::test]
+    async fn test_real_api_non_streaming_text() {
         let api_key = match get_openrouter_api_key() {
             Some(key) if !key.is_empty() => key,
             _ => {
@@ -922,13 +922,14 @@ mod tests {
                 name: String::new(),
             }],
             &[],
-        );
+        )
+        .await;
         assert_eq!(resp.error.code, 0);
         assert!(!resp.content.is_empty());
     }
 
-    #[test]
-    fn test_real_api_non_streaming_tool_call() {
+    #[tokio::test]
+    async fn test_real_api_non_streaming_tool_call() {
         let api_key = match get_openrouter_api_key() {
             Some(key) if !key.is_empty() => key,
             _ => {
@@ -963,14 +964,15 @@ mod tests {
                 name: String::new(),
             }],
             &tools,
-        );
+        )
+        .await;
         assert_eq!(resp.error.code, 0);
         assert!(resp.tool_calls.len() > 0);
         assert_eq!(resp.tool_calls[0].function_name, "read_file");
     }
 
-    #[test]
-    fn test_real_api_streaming_text() {
+    #[tokio::test]
+    async fn test_real_api_streaming_text() {
         let api_key = match get_openrouter_api_key() {
             Some(key) if !key.is_empty() => key,
             _ => {
@@ -1008,14 +1010,15 @@ mod tests {
                 }
                 true
             },
-        );
+        )
+        .await;
         assert_eq!(resp.error.code, 0);
         assert!(!received_text.is_empty());
         assert!(received_done);
     }
 
-    #[test]
-    fn test_real_api_streaming_tool_call() {
+    #[tokio::test]
+    async fn test_real_api_streaming_tool_call() {
         let api_key = match get_openrouter_api_key() {
             Some(key) if !key.is_empty() => key,
             _ => {
@@ -1057,7 +1060,8 @@ mod tests {
                 }
                 true
             },
-        );
+        )
+        .await;
         assert_eq!(resp.error.code, 0);
         assert!(resp.tool_calls.len() > 0);
         assert_eq!(resp.tool_calls[0].function_name, "read_file");

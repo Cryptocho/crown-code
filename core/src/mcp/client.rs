@@ -1,7 +1,5 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::thread;
-use std::time::Duration;
 
 use serde_json::{json, Value};
 
@@ -128,19 +126,19 @@ impl std::fmt::Debug for McpClientConfig {
 struct ClientInner {
     config: McpClientConfig,
     transport_kind: McpTransportKind,
-    stdio: Mutex<Option<StdioTransport>>,
-    http: Mutex<Option<HttpTransport>>,
+    stdio: tokio::sync::Mutex<Option<StdioTransport>>,
+    http: tokio::sync::Mutex<Option<HttpTransport>>,
     state: Mutex<McpConnectionState>,
     last_error: Mutex<String>,
     request_id_counter: Mutex<i64>,
     initialized: Mutex<bool>,
     heartbeat_running: AtomicBool,
-    transport_lock: Mutex<()>,
+    transport_lock: tokio::sync::Mutex<()>,
 }
 
 impl ClientInner {
-    fn send_json_rpc(&self, method: &str, params: &Value) -> Option<Value> {
-        let _transport_guard = self.transport_lock.lock().unwrap();
+    async fn send_json_rpc(&self, method: &str, params: &Value) -> Option<Value> {
+        let _transport_guard = self.transport_lock.lock().await;
         let timeout_ms = if self.config.request_timeout_ms > 0 {
             self.config.request_timeout_ms
         } else {
@@ -159,7 +157,7 @@ impl ClientInner {
         match self.transport_kind {
             McpTransportKind::Stdio => {
                 let write_ok = {
-                    let mut stdio_guard = self.stdio.lock().unwrap();
+                    let mut stdio_guard = self.stdio.lock().await;
                     let stdio = match stdio_guard.as_mut() {
                         Some(s) => s,
                         None => {
@@ -168,7 +166,7 @@ impl ClientInner {
                             return None;
                         }
                     };
-                    let write_err = write_json_line(stdio, &req_json);
+                    let write_err = write_json_line(stdio, &req_json).await;
                     write_err == TransportError::Ok
                 };
 
@@ -179,7 +177,7 @@ impl ClientInner {
                 }
 
                 let read_result = {
-                    let mut stdio_guard = self.stdio.lock().unwrap();
+                    let mut stdio_guard = self.stdio.lock().await;
                     let stdio = match stdio_guard.as_mut() {
                         Some(s) => s,
                         None => {
@@ -188,7 +186,7 @@ impl ClientInner {
                             return None;
                         }
                     };
-                    read_json_line(stdio, timeout_ms)
+                    read_json_line(stdio, timeout_ms).await
                 };
 
                 if read_result.error != TransportError::Ok {
@@ -225,7 +223,7 @@ impl ClientInner {
                 }
             }
             McpTransportKind::Http => {
-                let mut http_guard = self.http.lock().unwrap();
+                let mut http_guard = self.http.lock().await;
                 let http = match http_guard.as_mut() {
                     Some(h) => h,
                     None => {
@@ -235,14 +233,14 @@ impl ClientInner {
                     }
                 };
 
-                let http_resp = http.post_json(&req_json);
+                let http_resp = http.post_json(&req_json).await;
 
                 if http_resp.status_code == 401 {
                     if let Some(ref refresh) = self.config.refresh_token {
                         let new_token = refresh();
                         if !new_token.is_empty() {
                             http.bearer_token = new_token.clone();
-                            let retry_resp = http.post_json(&req_json);
+                            let retry_resp = http.post_json(&req_json).await;
                             if retry_resp.status_code == 200 && retry_resp.error.is_empty() {
                                 return match jsonrpc::parse_response(&retry_resp.body) {
                                     Ok(resp) => {
@@ -319,32 +317,32 @@ if let Some(resp_id) = resp["id"].as_i64()
         }
     }
 
-    fn send_notification(&self, method: &str, params: &Value) -> bool {
-        let _transport_guard = self.transport_lock.lock().unwrap();
+    async fn send_notification(&self, method: &str, params: &Value) -> bool {
+        let _transport_guard = self.transport_lock.lock().await;
         let notif_json = jsonrpc::build_notification(method, Some(params));
 
         match self.transport_kind {
             McpTransportKind::Stdio => {
-                let mut stdio_guard = self.stdio.lock().unwrap();
+                let mut stdio_guard = self.stdio.lock().await;
                 let stdio = match stdio_guard.as_mut() {
                     Some(s) => s,
                     None => return false,
                 };
-                write_json_line(stdio, &notif_json) == TransportError::Ok
+                write_json_line(stdio, &notif_json).await == TransportError::Ok
             }
             McpTransportKind::Http => {
-                let mut http_guard = self.http.lock().unwrap();
+                let mut http_guard = self.http.lock().await;
                 let http = match http_guard.as_mut() {
                     Some(h) => h,
                     None => return false,
                 };
-                let http_resp = http.post_json(&notif_json);
+                let http_resp = http.post_json(&notif_json).await;
                 http_resp.status_code == 200 && http_resp.error.is_empty()
             }
         }
     }
 
-    fn initialize(&self) -> bool {
+    async fn initialize(&self) -> bool {
         let params = json!({
             "protocolVersion": self.config.protocol_version,
             "clientInfo": {
@@ -353,11 +351,11 @@ if let Some(resp_id) = resp["id"].as_i64()
             },
             "capabilities": {}
         });
-        let resp = self.send_json_rpc("initialize", &params);
+        let resp = self.send_json_rpc("initialize", &params).await;
         if resp.is_none() {
             return false;
         }
-        if !self.send_notification("notifications/initialized", &Value::Null) {
+        if !self.send_notification("notifications/initialized", &Value::Null).await {
             *self.last_error.lock().unwrap() = "initialize: notification failed".to_string();
             return false;
         }
@@ -365,18 +363,18 @@ if let Some(resp_id) = resp["id"].as_i64()
         true
     }
 
-    fn reconnect(&self) -> bool {
+    async fn reconnect(&self) -> bool {
         *self.state.lock().unwrap() = McpConnectionState::Reconnecting;
 
         match self.transport_kind {
             McpTransportKind::Stdio => {
-                let mut stdio_guard = self.stdio.lock().unwrap();
+                let mut stdio_guard = self.stdio.lock().await;
                 if let Some(ref mut t) = *stdio_guard {
-                    stdio_close(t);
+                    stdio_close(t).await;
                 }
             }
             McpTransportKind::Http => {
-                let mut http_guard = self.http.lock().unwrap();
+                let mut http_guard = self.http.lock().await;
                 if let Some(ref mut t) = *http_guard {
                     t.close();
                 }
@@ -396,7 +394,7 @@ if let Some(resp_id) = resp["id"].as_i64()
         let mut current_delay = delay_ms;
 
         for _ in 0..max_retries {
-            thread::sleep(Duration::from_millis(current_delay));
+            tokio::time::sleep(std::time::Duration::from_millis(current_delay)).await;
 
             match self.transport_kind {
                 McpTransportKind::Stdio => {
@@ -404,7 +402,7 @@ if let Some(resp_id) = resp["id"].as_i64()
                         self.config.args.iter().map(|s| s.as_str()).collect();
                     match start_stdio_transport(&self.config.command, &args) {
                         Ok(t) => {
-                            *self.stdio.lock().unwrap() = Some(t);
+                            *self.stdio.lock().await = Some(t);
                         }
                         Err(_) => {
                             current_delay =
@@ -415,11 +413,11 @@ if let Some(resp_id) = resp["id"].as_i64()
                 }
                 McpTransportKind::Http => {
                     let t = HttpTransport::new(&self.config.server_url, &self.config.auth_token);
-                    *self.http.lock().unwrap() = Some(t);
+                    *self.http.lock().await = Some(t);
                 }
             }
 
-            if self.initialize() {
+            if self.initialize().await {
                 *self.state.lock().unwrap() = McpConnectionState::Connected;
                 return true;
             }
@@ -433,7 +431,7 @@ if let Some(resp_id) = resp["id"].as_i64()
         false
     }
 
-    fn heartbeat_proc(inner: Arc<ClientInner>) {
+    async fn heartbeat_proc(inner: Arc<ClientInner>) {
         let ping_interval_ms = if inner.config.ping_interval_sec > 0 {
             inner.config.ping_interval_sec * 1000
         } else {
@@ -443,7 +441,7 @@ if let Some(resp_id) = resp["id"].as_i64()
         while inner.heartbeat_running.load(Ordering::Acquire) {
             let mut waited: u64 = 0;
             while waited < ping_interval_ms {
-                thread::sleep(Duration::from_millis(100));
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                 waited += 100;
                 if !inner.heartbeat_running.load(Ordering::Acquire) {
                     return;
@@ -461,7 +459,7 @@ if let Some(resp_id) = resp["id"].as_i64()
                 }
             }
 
-            let resp = inner.send_json_rpc("ping", &Value::Null);
+            let resp = inner.send_json_rpc("ping", &Value::Null).await;
             if resp.is_none() {
                 let should_reconnect = {
                     let state = *inner.state.lock().unwrap();
@@ -472,7 +470,7 @@ if let Some(resp_id) = resp["id"].as_i64()
                 {
                     cb();
                 }
-                if inner.reconnect()
+                if inner.reconnect().await
                     && let Some(ref cb) = inner.config.on_reconnect
                 {
                     cb();
@@ -484,11 +482,11 @@ if let Some(resp_id) = resp["id"].as_i64()
 
 pub struct McpClient {
     inner: Arc<ClientInner>,
-    heartbeat_thread: Option<thread::JoinHandle<()>>,
+    heartbeat_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl McpClient {
-    pub fn new(config: McpClientConfig) -> Result<McpClient, String> {
+    pub async fn new(config: McpClientConfig) -> Result<McpClient, String> {
         let transport_kind = config.transport;
         let mut request_timeout_ms = config.request_timeout_ms;
         let mut connect_timeout_ms = config.connect_timeout_ms;
@@ -550,14 +548,14 @@ impl McpClient {
                 client_version,
             },
             transport_kind,
-            stdio: Mutex::new(None),
-            http: Mutex::new(None),
+            stdio: tokio::sync::Mutex::new(None),
+            http: tokio::sync::Mutex::new(None),
             state: Mutex::new(McpConnectionState::Disconnected),
             last_error: Mutex::new(String::new()),
             request_id_counter: Mutex::new(1),
             initialized: Mutex::new(false),
             heartbeat_running: AtomicBool::new(false),
-            transport_lock: Mutex::new(()),
+            transport_lock: tokio::sync::Mutex::new(()),
         });
 
         *inner.state.lock().unwrap() = McpConnectionState::Connecting;
@@ -567,29 +565,29 @@ impl McpClient {
                 let args: Vec<&str> = inner.config.args.iter().map(|s| s.as_str()).collect();
                 match start_stdio_transport(&inner.config.command, &args) {
                     Ok(t) => {
-                        *inner.stdio.lock().unwrap() = Some(t);
+                        *inner.stdio.lock().await = Some(t);
                     }
                     Err(e) => {
                         *inner.last_error.lock().unwrap() = e;
                         *inner.state.lock().unwrap() = McpConnectionState::Error;
                         return Ok(McpClient {
                             inner,
-                            heartbeat_thread: None,
+                            heartbeat_handle: None,
                         });
                     }
                 }
             }
             McpTransportKind::Http => {
                 let t = HttpTransport::new(&inner.config.server_url, &inner.config.auth_token);
-                *inner.http.lock().unwrap() = Some(t);
+                *inner.http.lock().await = Some(t);
             }
         }
 
-        if !inner.initialize() {
+        if !inner.initialize().await {
             *inner.state.lock().unwrap() = McpConnectionState::Error;
             return Ok(McpClient {
                 inner,
-                heartbeat_thread: None,
+                heartbeat_handle: None,
             });
         }
 
@@ -598,28 +596,17 @@ impl McpClient {
         inner.heartbeat_running.store(true, Ordering::Release);
 
         let inner_clone = Arc::clone(&inner);
-        let heartbeat_thread = match thread::Builder::new()
-            .name("mcp-heartbeat".to_string())
-            .spawn(move || {
-                ClientInner::heartbeat_proc(inner_clone);
-            })
-        {
-            Ok(h) => Some(h),
-            Err(e) => {
-                *inner.last_error.lock().unwrap() =
-                    format!("failed to create heartbeat thread: {}", e);
-                *inner.state.lock().unwrap() = McpConnectionState::Error;
-                None
-            }
-        };
+        let heartbeat_handle = tokio::spawn(async move {
+            ClientInner::heartbeat_proc(inner_clone).await;
+        });
 
         Ok(McpClient {
             inner,
-            heartbeat_thread,
+            heartbeat_handle: Some(heartbeat_handle),
         })
     }
 
-    pub fn call_tool(&self, tool_name: &str, arguments: &Value) -> McpCallToolResult {
+    pub async fn call_tool(&self, tool_name: &str, arguments: &Value) -> McpCallToolResult {
         {
             let state = *self.inner.state.lock().unwrap();
             if state != McpConnectionState::Connected {
@@ -635,7 +622,7 @@ impl McpClient {
         };
 
         let params = json!({"name": tool_name, "arguments": args});
-        let resp = self.inner.send_json_rpc("tools/call", &params);
+        let resp = self.inner.send_json_rpc("tools/call", &params).await;
         match resp {
             None => McpCallToolResult::default(),
             Some(val) => {
@@ -665,7 +652,7 @@ impl McpClient {
         }
     }
 
-    pub fn list_tools(&self) -> Vec<McpTool> {
+    pub async fn list_tools(&self) -> Vec<McpTool> {
         {
             let state = *self.inner.state.lock().unwrap();
             if state != McpConnectionState::Connected {
@@ -674,7 +661,7 @@ impl McpClient {
             }
         }
 
-        let resp = self.inner.send_json_rpc("tools/list", &Value::Null);
+        let resp = self.inner.send_json_rpc("tools/list", &Value::Null).await;
         match resp {
             None => Vec::new(),
             Some(val) => {
@@ -701,28 +688,28 @@ impl McpClient {
         self.inner.last_error.lock().unwrap().clone()
     }
 
-    pub fn destroy(&mut self) {
+    pub async fn destroy(&mut self) {
         self.inner
             .heartbeat_running
             .store(false, Ordering::Release);
 
         match self.inner.transport_kind {
             McpTransportKind::Stdio => {
-                let mut stdio_guard = self.inner.stdio.lock().unwrap();
+                let mut stdio_guard = self.inner.stdio.lock().await;
                 if let Some(ref mut t) = *stdio_guard {
-                    stdio_close(t);
+                    stdio_close(t).await;
                 }
             }
             McpTransportKind::Http => {
-                let mut http_guard = self.inner.http.lock().unwrap();
+                let mut http_guard = self.inner.http.lock().await;
                 if let Some(ref mut t) = *http_guard {
                     t.close();
                 }
             }
         }
 
-        if let Some(handle) = self.heartbeat_thread.take() {
-            let _ = handle.join();
+        if let Some(handle) = self.heartbeat_handle.take() {
+            handle.abort();
         }
     }
 }
@@ -732,6 +719,9 @@ impl Drop for McpClient {
         self.inner
             .heartbeat_running
             .store(false, Ordering::Release);
+        if let Some(handle) = self.heartbeat_handle.take() {
+            handle.abort();
+        }
     }
 }
 
@@ -769,59 +759,59 @@ mod tests {
     mod null_handling {
         use super::*;
 
-        #[test]
-        fn test_empty_config_produces_error_state() {
+        #[tokio::test]
+        async fn test_empty_config_produces_error_state() {
             let config = McpClientConfig::default();
-            let client = McpClient::new(config).unwrap();
+            let client = McpClient::new(config).await.unwrap();
             assert_eq!(client.state(), McpConnectionState::Error);
             assert!(!client.last_error().is_empty());
         }
 
-        #[test]
-        fn test_call_tool_on_disconnected() {
+        #[tokio::test]
+        async fn test_call_tool_on_disconnected() {
             let config = McpClientConfig {
                 transport: McpTransportKind::Stdio,
                 command: "/nonexistent".to_string(),
                 ..Default::default()
             };
-            let client = McpClient::new(config).unwrap();
-            let result = client.call_tool("echo", &json!({"message": "hi"}));
+            let client = McpClient::new(config).await.unwrap();
+            let result = client.call_tool("echo", &json!({"message": "hi"})).await;
             assert!(result.content.is_empty());
             assert!(!result.is_error);
-            let _ = client; // drop
+            let _ = client;
         }
 
-        #[test]
-        fn test_list_tools_on_disconnected() {
+        #[tokio::test]
+        async fn test_list_tools_on_disconnected() {
             let config = McpClientConfig {
                 transport: McpTransportKind::Stdio,
                 command: "/nonexistent".to_string(),
                 ..Default::default()
             };
-            let client = McpClient::new(config).unwrap();
-            let tools = client.list_tools();
+            let client = McpClient::new(config).await.unwrap();
+            let tools = client.list_tools().await;
             assert!(tools.is_empty());
         }
 
-        #[test]
-        fn test_get_state_on_error() {
+        #[tokio::test]
+        async fn test_get_state_on_error() {
             let config = McpClientConfig {
                 transport: McpTransportKind::Stdio,
                 command: "/nonexistent".to_string(),
                 ..Default::default()
             };
-            let client = McpClient::new(config).unwrap();
+            let client = McpClient::new(config).await.unwrap();
             assert_eq!(client.state(), McpConnectionState::Error);
         }
 
-        #[test]
-        fn test_get_last_error_on_error() {
+        #[tokio::test]
+        async fn test_get_last_error_on_error() {
             let config = McpClientConfig {
                 transport: McpTransportKind::Stdio,
                 command: "/nonexistent".to_string(),
                 ..Default::default()
             };
-            let client = McpClient::new(config).unwrap();
+            let client = McpClient::new(config).await.unwrap();
             let err = client.last_error();
             assert!(!err.is_empty());
         }
@@ -830,51 +820,51 @@ mod tests {
     mod error_state {
         use super::*;
 
-        #[test]
-        fn test_nonexistent_command_produces_error_state() {
+        #[tokio::test]
+        async fn test_nonexistent_command_produces_error_state() {
             let config = McpClientConfig {
                 transport: McpTransportKind::Stdio,
                 command: "/nonexistent/path".to_string(),
                 ..Default::default()
             };
-            let client = McpClient::new(config).unwrap();
+            let client = McpClient::new(config).await.unwrap();
             assert_eq!(client.state(), McpConnectionState::Error);
             assert!(!client.last_error().is_empty());
         }
 
-        #[test]
-        fn test_call_tool_on_error_returns_empty() {
+        #[tokio::test]
+        async fn test_call_tool_on_error_returns_empty() {
             let config = McpClientConfig {
                 transport: McpTransportKind::Stdio,
                 command: "/nonexistent/path".to_string(),
                 ..Default::default()
             };
-            let client = McpClient::new(config).unwrap();
-            let result = client.call_tool("echo", &json!({"message": "hi"}));
+            let client = McpClient::new(config).await.unwrap();
+            let result = client.call_tool("echo", &json!({"message": "hi"})).await;
             assert!(result.content.is_empty());
             assert!(!result.is_error);
         }
 
-        #[test]
-        fn test_list_tools_on_error_returns_empty() {
+        #[tokio::test]
+        async fn test_list_tools_on_error_returns_empty() {
             let config = McpClientConfig {
                 transport: McpTransportKind::Stdio,
                 command: "/nonexistent/path".to_string(),
                 ..Default::default()
             };
-            let client = McpClient::new(config).unwrap();
-            assert!(client.list_tools().is_empty());
+            let client = McpClient::new(config).await.unwrap();
+            assert!(client.list_tools().await.is_empty());
         }
 
-        #[test]
-        fn test_destroy_on_error_does_not_panic() {
+        #[tokio::test]
+        async fn test_destroy_on_error_does_not_panic() {
             let config = McpClientConfig {
                 transport: McpTransportKind::Stdio,
                 command: "/nonexistent/path".to_string(),
                 ..Default::default()
             };
-            let mut client = McpClient::new(config).unwrap();
-            client.destroy();
+            let mut client = McpClient::new(config).await.unwrap();
+            client.destroy().await;
         }
     }
 
@@ -899,8 +889,8 @@ mod tests {
     mod mock_server_integration {
         use super::*;
 
-        #[test]
-        fn test_connect_and_list_tools() {
+        #[tokio::test]
+        async fn test_connect_and_list_tools() {
             let path = match mock_server_path() {
                 Some(p) => p,
                 None => return,
@@ -913,20 +903,20 @@ mod tests {
                 client_version: "1.0".to_string(),
                 ..Default::default()
             };
-            let mut client = McpClient::new(config).unwrap();
+            let mut client = McpClient::new(config).await.unwrap();
             assert_eq!(client.state(), McpConnectionState::Connected);
 
-            let tools = client.list_tools();
+            let tools = client.list_tools().await;
             assert_eq!(tools.len(), 3);
             assert_eq!(tools[0].name, "echo");
             assert_eq!(tools[1].name, "add");
             assert_eq!(tools[2].name, "greet");
 
-            client.destroy();
+            client.destroy().await;
         }
 
-        #[test]
-        fn test_call_echo_tool() {
+        #[tokio::test]
+        async fn test_call_echo_tool() {
             let path = match mock_server_path() {
                 Some(p) => p,
                 None => return,
@@ -939,16 +929,16 @@ mod tests {
                 client_version: "1.0".to_string(),
                 ..Default::default()
             };
-            let mut client = McpClient::new(config).unwrap();
-            let result = client.call_tool("echo", &json!({"message": "hello world"}));
+            let mut client = McpClient::new(config).await.unwrap();
+            let result = client.call_tool("echo", &json!({"message": "hello world"})).await;
             assert_eq!(result.content.len(), 1);
             assert_eq!(result.content[0].text, "hello world");
             assert!(!result.is_error);
-            client.destroy();
+            client.destroy().await;
         }
 
-        #[test]
-        fn test_call_add_tool() {
+        #[tokio::test]
+        async fn test_call_add_tool() {
             let path = match mock_server_path() {
                 Some(p) => p,
                 None => return,
@@ -961,15 +951,15 @@ mod tests {
                 client_version: "1.0".to_string(),
                 ..Default::default()
             };
-            let mut client = McpClient::new(config).unwrap();
-            let result = client.call_tool("add", &json!({"a": 3, "b": 4}));
+            let mut client = McpClient::new(config).await.unwrap();
+            let result = client.call_tool("add", &json!({"a": 3, "b": 4})).await;
             assert_eq!(result.content.len(), 1);
             assert_eq!(result.content[0].text, "7");
-            client.destroy();
+            client.destroy().await;
         }
 
-        #[test]
-        fn test_call_greet_tool() {
+        #[tokio::test]
+        async fn test_call_greet_tool() {
             let path = match mock_server_path() {
                 Some(p) => p,
                 None => return,
@@ -982,15 +972,15 @@ mod tests {
                 client_version: "1.0".to_string(),
                 ..Default::default()
             };
-            let mut client = McpClient::new(config).unwrap();
-            let result = client.call_tool("greet", &json!({"name": "Kilo"}));
+            let mut client = McpClient::new(config).await.unwrap();
+            let result = client.call_tool("greet", &json!({"name": "Kilo"})).await;
             assert_eq!(result.content.len(), 1);
             assert_eq!(result.content[0].text, "Hello, Kilo!");
-            client.destroy();
+            client.destroy().await;
         }
 
-        #[test]
-        fn test_call_image_tool() {
+        #[tokio::test]
+        async fn test_call_image_tool() {
             let path = match mock_server_path() {
                 Some(p) => p,
                 None => return,
@@ -1003,18 +993,18 @@ mod tests {
                 client_version: "1.0".to_string(),
                 ..Default::default()
             };
-            let mut client = McpClient::new(config).unwrap();
-            let result = client.call_tool("image_tool", &json!({}));
+            let mut client = McpClient::new(config).await.unwrap();
+            let result = client.call_tool("image_tool", &json!({})).await;
             assert_eq!(result.content.len(), 2);
             assert_eq!(result.content[0].kind, "image");
             assert_eq!(result.content[0].data, "iVBORw0KGgo");
             assert_eq!(result.content[0].mime_type, "image/png");
             assert_eq!(result.content[1].kind, "text");
-            client.destroy();
+            client.destroy().await;
         }
 
-        #[test]
-        fn test_call_error_tool() {
+        #[tokio::test]
+        async fn test_call_error_tool() {
             let path = match mock_server_path() {
                 Some(p) => p,
                 None => return,
@@ -1027,15 +1017,15 @@ mod tests {
                 client_version: "1.0".to_string(),
                 ..Default::default()
             };
-            let mut client = McpClient::new(config).unwrap();
-            let result = client.call_tool("error_tool", &json!({}));
+            let mut client = McpClient::new(config).await.unwrap();
+            let result = client.call_tool("error_tool", &json!({})).await;
             assert!(result.content.is_empty());
             assert!(result.is_error);
-            client.destroy();
+            client.destroy().await;
         }
 
-        #[test]
-        fn test_call_empty_tool() {
+        #[tokio::test]
+        async fn test_call_empty_tool() {
             let path = match mock_server_path() {
                 Some(p) => p,
                 None => return,
@@ -1048,15 +1038,15 @@ mod tests {
                 client_version: "1.0".to_string(),
                 ..Default::default()
             };
-            let mut client = McpClient::new(config).unwrap();
-            let result = client.call_tool("empty_tool", &json!({}));
+            let mut client = McpClient::new(config).await.unwrap();
+            let result = client.call_tool("empty_tool", &json!({})).await;
             assert!(result.content.is_empty());
             assert!(!result.is_error);
-            client.destroy();
+            client.destroy().await;
         }
 
-        #[test]
-        fn test_call_unknown_tool() {
+        #[tokio::test]
+        async fn test_call_unknown_tool() {
             let path = match mock_server_path() {
                 Some(p) => p,
                 None => return,
@@ -1069,18 +1059,18 @@ mod tests {
                 client_version: "1.0".to_string(),
                 ..Default::default()
             };
-            let mut client = McpClient::new(config).unwrap();
-            let result = client.call_tool("unknown_tool", &json!({}));
+            let mut client = McpClient::new(config).await.unwrap();
+            let result = client.call_tool("unknown_tool", &json!({})).await;
             assert!(result.content.is_empty());
-            client.destroy();
+            client.destroy().await;
         }
     }
 
     mod heartbeat_lifecycle {
         use super::*;
 
-        #[test]
-        fn test_heartbeat_starts_and_stops_cleanly() {
+        #[tokio::test]
+        async fn test_heartbeat_starts_and_stops_cleanly() {
             let path = match mock_server_path() {
                 Some(p) => p,
                 None => return,
@@ -1094,9 +1084,9 @@ mod tests {
                 client_version: "1.0".to_string(),
                 ..Default::default()
             };
-            let mut client = McpClient::new(config).unwrap();
+            let mut client = McpClient::new(config).await.unwrap();
             assert_eq!(client.state(), McpConnectionState::Connected);
-            client.destroy();
+            client.destroy().await;
         }
     }
 }

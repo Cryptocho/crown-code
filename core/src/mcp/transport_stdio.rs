@@ -1,8 +1,10 @@
-use std::io::{BufRead, BufReader, Write};
-use std::os::unix::io::AsRawFd;
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::process::Stdio;
 use std::sync::Arc;
-use std::thread;
+use std::time::Duration;
+
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader as TokioBufReader};
+use tokio::process::{Child, ChildStdin, ChildStdout, Command};
+use tokio::time::timeout;
 
 use crate::command_exec::CircularBuffer;
 
@@ -31,7 +33,7 @@ pub struct StdioTransport {
     pub stdout: ChildStdout,
     pub stderr_buf: Arc<CircularBuffer>,
     pub last_error: String,
-    stderr_thread: Option<thread::JoinHandle<()>>,
+    stderr_task: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl std::fmt::Debug for StdioTransport {
@@ -63,11 +65,14 @@ pub fn start_stdio_transport(command: &str, args: &[&str]) -> Result<StdioTransp
     let stderr_buf = Arc::new(CircularBuffer::new());
     let buf_clone = Arc::clone(&stderr_buf);
 
-    let stderr_thread = thread::spawn(move || {
-        let reader = BufReader::new(stderr);
-        for line in reader.lines() {
-            match line {
-                Ok(l) => buf_clone.push(&l),
+    let stderr_task = tokio::spawn(async move {
+        let mut reader = TokioBufReader::new(stderr);
+        let mut line = String::new();
+        loop {
+            line.clear();
+            match reader.read_line(&mut line).await {
+                Ok(0) => break,
+                Ok(_) => buf_clone.push(line.trim_end()),
                 Err(_) => break,
             }
         }
@@ -79,48 +84,20 @@ pub fn start_stdio_transport(command: &str, args: &[&str]) -> Result<StdioTransp
         stdout,
         stderr_buf,
         last_error: String::new(),
-        stderr_thread: Some(stderr_thread),
+        stderr_task: Some(stderr_task),
     })
 }
 
-pub fn read_json_line(t: &mut StdioTransport, timeout_ms: u64) -> ReadLineResult {
-    let fd = t.stdout.as_raw_fd();
-    let mut reader = BufReader::new(&mut t.stdout);
+pub async fn read_json_line(t: &mut StdioTransport, timeout_ms: u64) -> ReadLineResult {
+    let mut reader = TokioBufReader::new(&mut t.stdout);
     let mut line = String::with_capacity(4096);
-
-    let timeout = if timeout_ms > i32::MAX as u64 {
-        i32::MAX
-    } else {
-        timeout_ms as i32
-    };
-
-    let mut poll_fds = [libc::pollfd {
-        fd,
-        events: libc::POLLIN,
-        revents: 0,
-    }];
-
-    let ret = unsafe { libc::poll(poll_fds.as_mut_ptr(), 1, timeout) };
-
-    if ret < 0 {
-        return ReadLineResult {
-            line: String::new(),
-            error: TransportError::ReadError,
-        };
-    }
-    if ret == 0 {
-        return ReadLineResult {
-            line: String::new(),
-            error: TransportError::Timeout,
-        };
-    }
-
-    match reader.read_line(&mut line) {
-        Ok(0) => ReadLineResult {
+    let dur = Duration::from_millis(timeout_ms);
+    match timeout(dur, reader.read_line(&mut line)).await {
+        Ok(Ok(0)) => ReadLineResult {
             line: String::new(),
             error: TransportError::Eof,
         },
-        Ok(_) => {
+        Ok(Ok(_)) => {
             if line.ends_with('\n') {
                 line.pop();
                 if line.ends_with('\r') {
@@ -132,17 +109,21 @@ pub fn read_json_line(t: &mut StdioTransport, timeout_ms: u64) -> ReadLineResult
                 error: TransportError::Ok,
             }
         }
-        Err(_) => ReadLineResult {
+        Ok(Err(_)) => ReadLineResult {
             line: String::new(),
             error: TransportError::ReadError,
+        },
+        Err(_) => ReadLineResult {
+            line: String::new(),
+            error: TransportError::Timeout,
         },
     }
 }
 
-pub fn write_json_line(t: &mut StdioTransport, line: &str) -> TransportError {
+pub async fn write_json_line(t: &mut StdioTransport, line: &str) -> TransportError {
     let payload = format!("{}\n", line);
-    match t.stdin.write_all(payload.as_bytes()) {
-        Ok(_) => match t.stdin.flush() {
+    match t.stdin.write_all(payload.as_bytes()).await {
+        Ok(_) => match t.stdin.flush().await {
             Ok(_) => TransportError::Ok,
             Err(_) => TransportError::WriteError,
         },
@@ -150,12 +131,11 @@ pub fn write_json_line(t: &mut StdioTransport, line: &str) -> TransportError {
     }
 }
 
-pub fn close(t: &mut StdioTransport) {
-    let _ = t.stdin.write_all(b"");
-    let _ = t.child.kill();
-    let _ = t.child.wait();
-    if let Some(handle) = t.stderr_thread.take() {
-        let _ = handle.join();
+pub async fn close(t: &mut StdioTransport) {
+    let _ = t.child.kill().await;
+    let _ = t.child.wait().await;
+    if let Some(handle) = t.stderr_task.take() {
+        handle.abort();
     }
 }
 
@@ -174,40 +154,40 @@ mod tests {
         assert!(result.unwrap_err().contains("empty"));
     }
 
-    #[test]
-    fn test_start_true_command() {
+    #[tokio::test]
+    async fn test_start_true_command() {
         let mut transport = start_stdio_transport("true", &[]).expect("should spawn 'true'");
-        close(&mut transport);
+        close(&mut transport).await;
     }
 
-    #[test]
-    fn test_read_timeout() {
+    #[tokio::test]
+    async fn test_read_timeout() {
         let mut transport =
             start_stdio_transport("sleep", &["10"]).expect("should spawn 'sleep 10'");
-        let result = read_json_line(&mut transport, 100);
+        let result = read_json_line(&mut transport, 100).await;
         assert_eq!(result.error, TransportError::Timeout);
-        close(&mut transport);
+        close(&mut transport).await;
     }
 
-    #[test]
-    fn test_close_empty_transport() {
+    #[tokio::test]
+    async fn test_close_empty_transport() {
         let mut transport = start_stdio_transport("true", &[]).expect("should spawn 'true'");
-        close(&mut transport);
-        close(&mut transport);
+        close(&mut transport).await;
+        close(&mut transport).await;
     }
 
-    #[test]
-    fn test_resource_cleanup() {
+    #[tokio::test]
+    async fn test_resource_cleanup() {
         let mut transport =
             start_stdio_transport("echo", &["hello"]).expect("should spawn 'echo hello'");
-        close(&mut transport);
+        close(&mut transport).await;
     }
 
-    #[test]
-    fn test_process_termination() {
+    #[tokio::test]
+    async fn test_process_termination() {
         let mut transport =
             start_stdio_transport("sleep", &["10"]).expect("should spawn 'sleep 10'");
-        close(&mut transport);
+        close(&mut transport).await;
         let status = transport.child.try_wait();
         assert!(status.is_ok());
         assert!(status.unwrap().is_some());
