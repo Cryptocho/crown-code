@@ -1,5 +1,20 @@
 # Changelog
 
+## Agent Loop 事件驱动化
+
+### Added
+- `core/src/agent/loop.rs`：`AgentEventHandler` trait（7 个异步安全回调：on_assistant_text/on_reasoning/on_tool_call_start/on_tool_result/on_usage/on_task_done/on_error），`AgentSession` struct（`new`/`handle_user_message`/`cancel`/`history_len`/`reset`），单元测试覆盖构造/取消/重置/共享 Arc 标志
+- `core/src/ipc/session_manager.rs`：`IpcEventHandler` struct 实现 `AgentEventHandler`，通过 `try_send` 非阻塞推送 JSON-RPC 通知（assistant_text/assistant_reasoning/tool_call_start/tool_result/usage/task_done/error）；`SessionManager::cancel_session()` 使用独立 `cancel_flags: RwLock<HashMap<String, Arc<AtomicBool>>>` 实现无锁取消
+- 新增测试：`test_cancel_session`、`test_cancel_nonexistent`（session_manager.rs）；`test_agent_session_new_has_system_prompt`、`test_agent_session_cancel`、`test_agent_session_reset`、`test_agent_session_cancelled_flag_shared`（loop.rs）
+
+### Refactored
+- `core/src/agent/loop.rs`：将 `run_agent_loop` 的内层 agent loop 提取为 `AgentSession::handle_user_message`，所有终端 I/O（print!/eprintln!/stdin.read_line）替换为 `AgentEventHandler` 回调；`run_agent_loop` 重构为 `AgentSession` 的 CLI 薄包装
+- `core/src/ipc/session_manager.rs`：`SessionState` 移除 `history`/`cancelled` 字段，新增 `agent: AgentSession`；`SessionManager` 新增 `cancel_flags` 独立 RwLock map，锁顺序统一为 `sessions → cancel_flags` 避免死锁
+- `core/src/ipc/server.rs`：`user_message` handler 改为 `tokio::spawn` 异步执行 `state.agent.handle_user_message()`，`cancel` handler 使用 `sm.cancel_session()`（无需锁 SessionState，无死锁风险）；移除 3 个未使用 import
+- `test_user_message_stub_events` 标记为 `#[ignore]`（需真实 API）
+
+- Affected files: `core/src/agent/loop.rs`, `core/src/ipc/session_manager.rs`, `core/src/ipc/server.rs`
+
 ## IPC 协议定义
 
 ### Added

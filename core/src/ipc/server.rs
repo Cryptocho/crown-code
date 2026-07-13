@@ -8,11 +8,11 @@ use tokio::task::JoinHandle;
 
 use crate::api::types::ApiClientConfig;
 use crate::ipc::message::{
-    make_error_response, make_notification, make_response, JsonRpcMessage, METHOD_ASSISTANT_TEXT,
-    METHOD_CANCEL, METHOD_CREATE_SESSION, METHOD_DESTROY_SESSION, METHOD_LIST_SESSIONS,
-    METHOD_NOT_FOUND, METHOD_SET_CONFIG, METHOD_TASK_DONE, METHOD_USER_MESSAGE, SESSION_NOT_FOUND,
+    make_error_response, make_response, JsonRpcMessage, METHOD_CANCEL, METHOD_CREATE_SESSION,
+    METHOD_DESTROY_SESSION, METHOD_LIST_SESSIONS, METHOD_NOT_FOUND, METHOD_SET_CONFIG,
+    METHOD_USER_MESSAGE, SESSION_NOT_FOUND,
 };
-use crate::ipc::session_manager::SessionManager;
+use crate::ipc::session_manager::{IpcEventHandler, SessionManager};
 use crate::ipc::transport::{IpcConnection, IpcTransport, IpcTransportError};
 
 pub struct IpcServer {
@@ -176,32 +176,29 @@ async fn dispatch_request(
                     None,
                 );
             }
-            let _ = event_tx
-                .send(make_notification(
-                    METHOD_ASSISTANT_TEXT,
-                    serde_json::json!({"session_id": sid, "delta": format!("echo: {content}")}),
-                ))
-                .await;
-            let _ = event_tx
-                .send(make_notification(
-                    METHOD_TASK_DONE,
-                    serde_json::json!({"session_id": sid, "summary": "stub response"}),
-                ))
-                .await;
+            let session = match sm.get_session(sid).await {
+                Some(s) => s,
+                None => return make_error_response(id, SESSION_NOT_FOUND, "session not found", None),
+            };
+
+            let sid_owned = sid.to_string();
+            let content_owned = content.to_string();
+
+            tokio::spawn(async move {
+                let mut state = session.lock().await;
+                let mut handler = IpcEventHandler::new(sid_owned.clone(), state.event_tx.clone());
+                state.agent.handle_user_message(&content_owned, &mut handler).await;
+                state.info.message_count += 1;
+            });
+
             make_response(id, serde_json::json!({"ok": true}))
         }
         METHOD_CANCEL => {
             let sid = params["session_id"].as_str().unwrap_or("");
-            match sm.get_session(sid).await {
-                Some(session) => {
-                    session
-                        .lock()
-                        .await
-                        .cancelled
-                        .store(true, std::sync::atomic::Ordering::Release);
-                    make_response(id, serde_json::json!({"ok": true}))
-                }
-                None => make_error_response(id, SESSION_NOT_FOUND, "session not found", None),
+            if sm.cancel_session(sid).await {
+                make_response(id, serde_json::json!({"ok": true}))
+            } else {
+                make_error_response(id, SESSION_NOT_FOUND, "session not found", None)
             }
         }
         METHOD_SET_CONFIG => {
@@ -236,7 +233,9 @@ async fn dispatch_request(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ipc::message::make_request;
+    use crate::ipc::message::{
+        make_request, METHOD_ASSISTANT_TEXT, METHOD_TASK_DONE,
+    };
     use interprocess::local_socket::traits::tokio::Stream as StreamTrait;
     use interprocess::local_socket::ToFsName;
 
@@ -481,6 +480,7 @@ mod tests {
         assert!(resp.error.is_some());
     }
 
+    #[ignore = "requires live API — user_message now delegates to AgentSession::handle_user_message"]
     #[tokio::test]
     async fn test_user_message_stub_events() {
         let path = unique_socket_path();

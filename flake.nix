@@ -20,7 +20,7 @@
         pkgs = import nixpkgs { inherit system overlays; };
 
         rustToolchain = pkgs.rust-bin.stable.latest.default.override {
-          extensions = [ "rust-src" "rust-analyzer" "clippy" "rustfmt" ];
+          extensions = [ "rust-src" "rust-analyzer" "clippy" "rustfmt" "llvm-tools-preview" ];
         };
 
         craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
@@ -67,8 +67,7 @@
           inputsFrom = [ core tui ];
           packages = with pkgs; [
             rustToolchain
-            cargo-watch
-            cargo-edit
+            cargo-llvm-cov
           ];
 
           shellHook = ''

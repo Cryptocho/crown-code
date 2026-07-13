@@ -1,12 +1,16 @@
 use std::collections::HashMap;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, Mutex, RwLock};
 
-use crate::api::types::{ApiClientConfig, Message};
-use crate::ipc::message::JsonRpcMessage;
+use crate::agent::r#loop::{AgentEventHandler, AgentSession};
+use crate::api::types::ApiClientConfig;
+use crate::ipc::message::{
+    make_notification, JsonRpcMessage, METHOD_ASSISTANT_REASONING, METHOD_ASSISTANT_TEXT,
+    METHOD_ERROR, METHOD_TASK_DONE, METHOD_TOOL_CALL_START, METHOD_TOOL_RESULT, METHOD_USAGE,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionInfo {
@@ -18,9 +22,89 @@ pub struct SessionInfo {
 
 pub struct SessionState {
     pub info: SessionInfo,
-    pub history: Vec<Message>,
-    pub cancelled: Arc<AtomicBool>,
+    pub agent: AgentSession,
     pub event_tx: mpsc::Sender<JsonRpcMessage>,
+}
+
+pub(crate) struct IpcEventHandler {
+    session_id: String,
+    event_tx: mpsc::Sender<JsonRpcMessage>,
+}
+
+impl IpcEventHandler {
+    pub fn new(session_id: String, event_tx: mpsc::Sender<JsonRpcMessage>) -> Self {
+        Self { session_id, event_tx }
+    }
+}
+
+impl AgentEventHandler for IpcEventHandler {
+    fn on_assistant_text(&mut self, delta: &str) {
+        let _ = self.event_tx.try_send(make_notification(
+            METHOD_ASSISTANT_TEXT,
+            serde_json::json!({"session_id": self.session_id, "delta": delta}),
+        ));
+    }
+
+    fn on_reasoning(&mut self, delta: &str) {
+        let _ = self.event_tx.try_send(make_notification(
+            METHOD_ASSISTANT_REASONING,
+            serde_json::json!({"session_id": self.session_id, "delta": delta}),
+        ));
+    }
+
+    fn on_tool_call_start(&mut self, call_id: &str, name: &str, arguments: &str) {
+        let _ = self.event_tx.try_send(make_notification(
+            METHOD_TOOL_CALL_START,
+            serde_json::json!({
+                "session_id": self.session_id,
+                "call_id": call_id,
+                "name": name,
+                "arguments": arguments,
+            }),
+        ));
+    }
+
+    fn on_tool_result(&mut self, call_id: &str, name: &str, content: &str, is_error: bool) {
+        let _ = self.event_tx.try_send(make_notification(
+            METHOD_TOOL_RESULT,
+            serde_json::json!({
+                "session_id": self.session_id,
+                "call_id": call_id,
+                "name": name,
+                "content": content,
+                "is_error": is_error,
+            }),
+        ));
+    }
+
+    fn on_usage(&mut self, input_tokens: i32, output_tokens: i32) {
+        let _ = self.event_tx.try_send(make_notification(
+            METHOD_USAGE,
+            serde_json::json!({
+                "session_id": self.session_id,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+            }),
+        ));
+    }
+
+    fn on_task_done(&mut self, summary: &str) {
+        let _ = self.event_tx.try_send(make_notification(
+            METHOD_TASK_DONE,
+            serde_json::json!({"session_id": self.session_id, "summary": summary}),
+        ));
+    }
+
+    fn on_error(&mut self, code: i32, message: &str) {
+        let _ = self.event_tx.try_send(make_notification(
+            METHOD_ERROR,
+            serde_json::json!({
+                "session_id": self.session_id,
+                "code": code,
+                "message": message,
+            }),
+        ));
+    }
 }
 
 fn generate_session_id() -> String {
@@ -29,6 +113,7 @@ fn generate_session_id() -> String {
 
 pub struct SessionManager {
     sessions: RwLock<HashMap<String, Arc<Mutex<SessionState>>>>,
+    cancel_flags: RwLock<HashMap<String, Arc<AtomicBool>>>,
     config: Mutex<ApiClientConfig>,
 }
 
@@ -36,6 +121,7 @@ impl SessionManager {
     pub fn new(config: ApiClientConfig) -> Self {
         Self {
             sessions: RwLock::new(HashMap::new()),
+            cancel_flags: RwLock::new(HashMap::new()),
             config: Mutex::new(config),
         }
     }
@@ -45,11 +131,15 @@ impl SessionManager {
         cwd: String,
         event_tx: mpsc::Sender<JsonRpcMessage>,
     ) -> String {
+        let config = self.config.lock().await.clone();
         let session_id = generate_session_id();
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let agent = AgentSession::new(config, cwd.clone(), cancelled.clone());
+
         let state = SessionState {
             info: SessionInfo {
                 session_id: session_id.clone(),
@@ -57,24 +147,30 @@ impl SessionManager {
                 created_at: now,
                 message_count: 0,
             },
-            history: Vec::new(),
-            cancelled: Arc::new(AtomicBool::new(false)),
+            agent,
             event_tx,
         };
         self.sessions
             .write()
             .await
             .insert(session_id.clone(), Arc::new(Mutex::new(state)));
+        self.cancel_flags.write().await.insert(session_id.clone(), cancelled);
         session_id
     }
 
     pub async fn destroy_session(&self, session_id: &str) -> Result<(), ()> {
-        self.sessions
-            .write()
-            .await
-            .remove(session_id)
-            .map(|_| ())
-            .ok_or(())
+        self.sessions.write().await.remove(session_id).map(|_| ()).ok_or(())?;
+        self.cancel_flags.write().await.remove(session_id);
+        Ok(())
+    }
+
+    pub async fn cancel_session(&self, session_id: &str) -> bool {
+        if let Some(flag) = self.cancel_flags.read().await.get(session_id) {
+            flag.store(true, Ordering::SeqCst);
+            true
+        } else {
+            false
+        }
     }
 
     pub async fn get_session(
@@ -204,5 +300,19 @@ mod tests {
             h.await.unwrap();
         }
         assert_eq!(sm.session_count().await, 0);
+    }
+
+    #[tokio::test]
+    async fn test_cancel_session() {
+        let sm = SessionManager::new(make_config());
+        let (tx, _rx) = mpsc::channel(256);
+        let id = sm.create_session("/tmp".to_string(), tx).await;
+        assert!(sm.cancel_session(&id).await);
+    }
+
+    #[tokio::test]
+    async fn test_cancel_nonexistent() {
+        let sm = SessionManager::new(make_config());
+        assert!(!sm.cancel_session("nonexistent").await);
     }
 }

@@ -2,7 +2,7 @@
 
 ## Project Description
 
-A vibe coding TUI tool. Core (daemon-style process) communicates with frontends (TUI, future GUI/WebUI) via IPC (JSON-RPC over stdio/Unix socket). Replaces the original Nim prototype.
+A vibe coding TUI tool. Core (daemon-style process) communicates with frontends (TUI, future GUI) via IPC (JSON-RPC over stdio/Unix socket).
 
 Compared to cline, this project aims to deliver:
 - **Finer-grained rollback**: checkpoint after every file edit, not just at request boundaries
@@ -11,6 +11,7 @@ Compared to cline, this project aims to deliver:
 - **Better TUI**: built with ratatui, full terminal UI with split panes, live streaming
 - **Workspace vector index**: build and query a vector index over the entire workspace for semantic search
 - **Accurate session cost stats**: include subagent calls in total cost tracking, not just top-level LLM requests
+- **Regenerate when stop**: regenerate llm response when error or user interrupt
 
 ## Project Structure
 
@@ -82,12 +83,12 @@ Compared to cline, this project aims to deliver:
 
 ```
 ┌─────────────────┐
-│  tui (ratatui)  │  ←── JSON-RPC over stdio/socket ──→  ┌──────────────────────────┐
+│  tui (ratatui)  │  ←── JSON-RPC over stdio/socket ──→   ┌──────────────────────────┐
 ├─────────────────┤                                       │  core (daemon)           │
-│ gui (future)    │  ←── JSON-RPC over socket ──────────→  │                          │
-├─────────────────┤                                       │  ┌────────────────────┐  │
-│ webui (future)  │  ←── JSON-RPC over WebSocket ──────→  │  │ agent/             │  │
-└─────────────────┘                                       │  │  - tools           │  │
+│ gui (future)    │  ←── JSON-RPC over socket ──────────→ │                          │
+└─────────────────┘                                       │  ┌────────────────────┐  │
+                                                          │  │ agent/             │  │
+                                                          │  │  - tools           │  │
                                                           │  │  - prompt          │  │
                                                           │  │  - loop            │  │
                                                           │  └────────────────────┘  │
@@ -134,7 +135,6 @@ Compared to cline, this project aims to deliver:
                                                           └──────────────────────────┘
 ```
 
-- **JSON-RPC 2.0** over stdio for TUI, Unix domain sockets for GUI/WebUI
 - **Multi-session**: core assigns each frontend connection a session ID; sessions are isolated
 - **Checkpoint on every file write**: each edit creates a git-like checkpoint for rollback (planned)
 - **Agent loop**: reads stdin user input → calls OpenAI-compatible API → executes tool calls → feeds results back → repeats until completion
@@ -168,9 +168,21 @@ cargo clippy -p crown-tui
 cargo add <dependency>                 # Add dependencies via cargo-edit
 ```
 
+### Code Coverage
+
+Line coverage via `cargo-llvm-cov`. Run inside `nix develop` or via `nix develop --command`:
+
+```bash
+# Full coverage with summary table
+cargo llvm-cov --workspace
+
+# Summary only (per-file coverage percentages)
+cargo llvm-cov report --summary-only
+```
+
 ### Development Process
 
-1. Propose a plan after verification and wait for approval
+1. Propose a plan after self verification and wait for approval
 2. Implement the plan; if unworkable at any step, stop and report
 3. Use subagent to review uncommitted code
 4. Update CHANGELOG.md (after review, not before)
@@ -181,14 +193,13 @@ cargo add <dependency>                 # Add dependencies via cargo-edit
 ## Coding Style
 
 - Rust naming conventions: snake_case for functions/variables, PascalCase for types
-- `edition = "2024"` (workspace-level, set in workspace `Cargo.toml`)
 - 4-space indentation
 - `cargo fmt` before committing
 - `cargo clippy` — no warnings
 - Module structure: one module per file, nested modules in directories
 - Use `r#` raw identifiers (e.g. `r#loop`) when a module name conflicts with a Rust keyword
 - Use `pub(crate)` visibility to expose items across sibling modules without making them public
-- **Do not use phase numbers in commit messages or CHANGELOG entries.** Commit messages and changelogs describe what functionally changed, not which planning phase produced the change. Phase numbers belong in plan files (`.kilo/plans/`) and TODO.md only.
+- **Do not use phase numbers or TODO.md in commit messages or CHANGELOG entries.** Commit messages and changelogs describe what functionally changed, not which planning phase produced the change. Phase numbers belong in plan files (`.kilo/plans/`) and TODO.md only.
 
 ## CHANGELOG Format Specification
 
