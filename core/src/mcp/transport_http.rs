@@ -254,4 +254,28 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].data, "hello");
     }
+
+    #[test]
+    fn test_http_response_struct_fields() {
+        let mut headers = HashMap::new();
+        headers.insert("content-type".to_string(), "application/json".to_string());
+        let resp = HttpResponse {
+            status_code: 200,
+            headers: headers.clone(),
+            body: r#"{"result":"ok"}"#.to_string(),
+            error: String::new(),
+            events: Vec::new(),
+        };
+        assert_eq!(resp.status_code, 200);
+        assert_eq!(resp.headers["content-type"], "application/json");
+        assert_eq!(resp.body, r#"{"result":"ok"}"#);
+        assert!(resp.error.is_empty());
+        assert!(resp.events.is_empty());
+    }
+
+    #[test]
+    fn test_http_transport_url_with_path() {
+        let t = HttpTransport::new("http://host:8080/mcp/v1", "");
+        assert_eq!(t.base_url, "http://host:8080/mcp/v1");
+    }
 }

@@ -1089,4 +1089,109 @@ mod tests {
             client.destroy().await;
         }
     }
+
+    mod config_checks {
+        use super::*;
+
+        #[test]
+        fn test_mcp_client_config_defaults() {
+            let config = McpClientConfig::default();
+            assert_eq!(config.transport, McpTransportKind::Stdio);
+            assert!(config.command.is_empty());
+            assert_eq!(config.request_timeout_ms, DEFAULT_REQUEST_TIMEOUT);
+            assert_eq!(config.protocol_version, DEFAULT_PROTOCOL_VERSION);
+            assert_eq!(config.client_name, DEFAULT_CLIENT_NAME);
+        }
+
+        #[test]
+        fn test_mcp_client_config_debug_redacts_token() {
+            let config = McpClientConfig {
+                auth_token: "secret".to_string(),
+                ..Default::default()
+            };
+            let debug = format!("{:?}", config);
+            assert!(debug.contains("***"));
+            assert!(!debug.contains("secret"));
+        }
+    }
+
+    mod state_variants {
+        use super::*;
+
+        #[test]
+        fn test_mcp_connection_state_variants_distinct() {
+            use McpConnectionState::*;
+            let states = vec![Disconnected, Connecting, Connected, Reconnecting, Error];
+            for i in 0..states.len() {
+                for j in (i + 1)..states.len() {
+                    assert_ne!(states[i], states[j], "{:?} == {:?}", states[i], states[j]);
+                }
+            }
+        }
+    }
+
+    mod content_types {
+        use super::*;
+
+        #[test]
+        fn test_mcp_content_fields() {
+            let content = McpContent {
+                kind: "text".to_string(),
+                text: "hello".to_string(),
+                data: String::new(),
+                mime_type: String::new(),
+            };
+            assert_eq!(content.kind, "text");
+            assert_eq!(content.text, "hello");
+        }
+
+        #[test]
+        fn test_mcp_call_tool_result_multiple_content() {
+            let result = McpCallToolResult {
+                content: vec![
+                    McpContent {
+                        kind: "text".to_string(),
+                        text: "first".to_string(),
+                        ..Default::default()
+                    },
+                    McpContent {
+                        kind: "text".to_string(),
+                        text: "second".to_string(),
+                        ..Default::default()
+                    },
+                ],
+                is_error: false,
+            };
+            assert_eq!(result.content.len(), 2);
+            assert_eq!(result.content[0].text, "first");
+            assert_eq!(result.content[1].text, "second");
+        }
+    }
+
+    mod error_paths {
+        use super::*;
+
+        #[tokio::test]
+        async fn test_mcp_client_http_error_state() {
+            let config = McpClientConfig {
+                transport: McpTransportKind::Http,
+                server_url: "http://127.0.0.1:1".to_string(),
+                ..Default::default()
+            };
+            let client = McpClient::new(config).await.unwrap();
+            assert_eq!(client.state(), McpConnectionState::Error);
+        }
+
+        #[tokio::test]
+        async fn test_mcp_client_destroy_twice() {
+            let config = McpClientConfig {
+                transport: McpTransportKind::Stdio,
+                command: "/nonexistent".to_string(),
+                ..Default::default()
+            };
+            let mut client = McpClient::new(config).await.unwrap();
+            client.destroy().await;
+            client.destroy().await;
+        }
+    }
 }

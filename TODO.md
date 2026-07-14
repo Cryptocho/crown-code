@@ -282,103 +282,145 @@ async fn main() {
 - [ ] CLI 参数解析：`--socket-path`（覆盖默认 socket 路径）、`--config`（配置文件路径）
 - [ ] 默认进入 daemon 模式（监听本地 socket）
 
-### 1.6 TUI: 基础框架
+### 1.6 TUI: 基础框架（参考 codex-rs ratatui 架构）
+
+> 参考文档：`CODEX.md` — codex-rs 的 ratatui TUI 实现详解
+
+#### 文件结构
 
 ```
 tui/src/
-├── main.rs             # 入口：连接 core daemon + 初始化 terminal
-├── app.rs              # App 状态机（消息列表、输入框、工具面板、焦点管理）
-├── event.rs            # 终端事件源（键盘、resize） + IPC 事件源（core 推送）
-├── ipc.rs              # Core daemon IPC 客户端（跨平台本地 socket 连接、JSON-RPC 读写）
+├── main.rs             # 入口：run_main() → 初始化 terminal + 启动事件循环
+├── app.rs              # App 状态机 + tokio::select! 主事件循环
+├── app_event.rs        # AppEvent 枚举（内部消息总线）
+├── event.rs            # TuiEvent 枚举（终端事件：Key/Paste/Resize/Draw）+ 事件流合并
+├── ipc.rs              # IPC 客户端（连接 core daemon、JSON-RPC 读写分离）
+├── chatwidget.rs       # ChatWidget 主聊天面板状态
+├── history_cell.rs     # HistoryCell trait + 消息 cell 类型定义
+├── renderable.rs       # Renderable trait + FlexRenderable 布局引擎
+├── tui.rs              # Tui 终端抽象封装（init/restore/draw/event_stream）
+├── keymap.rs           # 键绑定定义
 ├── ui/
 │   ├── mod.rs          # UI 渲染入口（compose 各子面板）
-│   ├── chat.rs         # 聊天消息面板（可滚动、markdown 渲染）
-│   ├── input.rs        # 用户输入框（多行编辑、Enter 发送）
-│   ├── tools.rs        # 工具调用面板（折叠/展开、状态标记）
-│   └── status.rs       # 状态栏（session_id、模型名、token 用量、连接状态）
+│   ├── chat.rs         # 聊天消息渲染（HistoryCell → ratatui Widget）
+│   ├── input.rs        # 输入框渲染
+│   ├── tools.rs        # 工具调用面板渲染
+│   ├── status.rs       # 状态栏渲染（session_id、模型名、token 用量、连接状态）
+│   └── streaming.rs    # 流式文本渲染（两区模型：stable scrollback + tail 活动区）
 ```
 
-#### `tui/Cargo.toml` 依赖
+#### 核心设计模式（源自 codex-rs）
 
-```toml
-[dependencies]
-crown-core = { path = "../core" }   # 仅用于共享类型定义（Message、ToolCall 等），不依赖业务逻辑
-ratatui = "0.29"
-crossterm = "0.28"
-tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "sync", "macros"] }
-interprocess = { version = "2", features = ["tokio"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-anyhow = "1"
+##### 1. 三层事件架构
+
+```
+┌─ TuiEvent（终端层）──────────────────────────────┐
+│  Key(KeyEvent)     → 键盘输入                    │
+│  Paste(String)     → 粘贴内容                    │
+│  Resize            → 终端大小变化                │
+│  Draw              → 计划重绘                    │
+└─────────────────────────────────────────────────┘
+         ↓
+┌─ AppEvent（应用层）──────────────────────────────┐
+│  主要内部事件：                                   │
+│  UserMessageSent, AssistantDelta, ToolCallStart   │
+│  ToolResult, TaskDone, Error, CancelRequested     │
+│  RedrawRequested, Quit                            │
+└─────────────────────────────────────────────────┘
+         ↓
+┌─ IpcMessage（后端层）────────────────────────────┐
+│  core daemon 推送的 JSON-RPC 消息                 │
+│  assistant_text, assistant_reasoning              │
+│  tool_call_start, tool_result, usage, task_done   │
+│  error, session_created, session_destroyed        │
+└─────────────────────────────────────────────────┘
 ```
 
-**关键**：TUI 仅依赖 core 的**类型定义**（通过 `crown-core` crate 的 `ipc::message` 等模块），不调用 core 的 agent/api/mcp 等业务逻辑。所有业务逻辑在 core daemon 进程中执行。
+- `TuiEvent`：crossterm 事件通过独立 tokio task 读取，合并为统一的事件流
+- `AppEvent`：App 内部通过 `tokio::sync::mpsc::UnboundedSender<AppEvent>` 发送
+- `IpcMessage`：IPC 客户端在独立 task 中读取，通过 channel 传递到主循环
 
-#### `ipc.rs` — IPC 客户端
+##### 2. Renderable trait + FlexRenderable 布局引擎（替代直接使用 ratatui Layout）
 
 ```rust
-use interprocess::local_socket::tokio::Stream;
+// renderable.rs
+pub trait Renderable {
+    fn render(&self, area: Rect, buf: &mut Buffer);
+    fn desired_height(&self, width: u16) -> u16;
+    fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)>;
+}
+```
 
-pub struct IpcClient {
-    stream: Stream,
+FlexRenderable 按 flex 权重分配子区域高度，实现自适应布局：
+
+```
+┌──────────────────────────────────────┬────────────────────┐
+│  ChatPanel (flex: 1)                 │  ToolPanel (flex: 0)│
+│  聊天消息 + 流式输出                   │  工具调用列表        │
+│  填充可用空间                          │  固定宽度 30%       │
+│                                      │                     │
+├──────────────────────────────────────┴────────────────────┤
+│  InputBar (flex: 0)                  固定高度              │
+│  用户输入框 + 状态提示                                       │
+└──────────────────────────────────────────────────────────┘
+```
+
+##### 3. HistoryCell trait（类型化消息渲染）
+
+```rust
+// history_cell.rs
+pub trait HistoryCell: Debug + Send + Sync {
+    fn display_lines(&self, width: u16) -> Vec<Line<'static>>;
+    fn desired_height(&self, width: u16) -> u16;
+    fn is_stream_continuation(&self) -> bool;
+}
+
+// 实现类型
+pub struct UserMessageCell { ... }        // 用户消息
+pub struct AssistantMessageCell { ... }   // assistant 回复（支持流式追加）
+pub struct ToolCallCell { ... }           // 工具调用（命令 + 输出 + 状态）
+pub struct SystemMessageCell { ... }      // 系统消息
+pub struct ErrorCell { ... }             // 错误消息
+```
+
+每种消息类型独立控制渲染样式，便于后续扩展（如 markdown 渲染、语法高亮、patch diff 等）。
+
+##### 4. 流式输出两区模型
+
+```
+raw_source (markdown 原文)
+    ↓ 按宽度重新渲染
+rendered_lines
+    ↓ 分区
+┌──────────────────────┐
+│ stable region        │ → 提交到 scrollback（已确认的行）
+├──────────────────────┤
+│ tail region          │ → 活动 cell（当前流式文本，持续更新）
+└──────────────────────┘
+```
+
+- 收到 IPC `assistant_text` delta → 累积到 raw_source → 重新渲染 → 分区
+- stable region 的行逐帧 drain 到 scrollback，产生打字效果
+- 流结束时 tail region 最终提交，整个消息固化为 `AssistantMessageCell`
+
+##### 5. Tui 终端抽象
+
+```rust
+// tui.rs
+pub struct Tui {
+    terminal: Terminal<CrosstermBackend<Stdout>>,
+    event_tx: mpsc::UnboundedSender<TuiEvent>,
     // ...
 }
 
-impl IpcClient {
-    pub async fn connect(socket_name: &str) -> Result<Self, IpcError>;
-    pub async fn send_request(&self, method: &str, params: Value) -> Result<Value, IpcError>;
-    pub async fn send_notification(&self, method: &str, params: Value) -> Result<(), IpcError>;
-    pub async fn read_message(&self) -> Result<JsonRpcMessage, IpcError>;
+impl Tui {
+    pub fn init() -> Result<Self>;        // raw mode, bracketed paste, alternate screen
+    pub fn restore() -> Result<()>;       // 恢复终端状态
+    pub fn draw<F>(&mut self, f: F)       // 渲染 + 同步更新 viewport
+    where F: FnOnce(&mut Frame);
+    pub fn event_stream(&self) -> impl Stream<Item = TuiEvent>;  // 合并的事件流
 }
 ```
-
-- [ ] 连接时自动检测 socket 是否存在，不存在则提示用户启动 core daemon
-- [ ] 断线重连逻辑（socket 断开时尝试重连 3 次，间隔 1s/2s/4s）
-- [ ] 读写分离：读消息和写消息分别在独立 tokio task 中运行，避免死锁
-
-#### `app.rs` — App 状态机
-
-```rust
-pub struct App {
-    pub session_id: Option<String>,
-    pub messages: Vec<ChatMessage>,
-    pub input: String,
-    pub input_cursor: usize,
-    pub tool_calls: Vec<ToolCallDisplay>,
-    pub scroll_offset: usize,
-    pub status: ConnectionStatus,
-    pub should_quit: bool,
-    // ...
-}
-
-pub enum ChatMessage {
-    User { content: String },
-    Assistant { content: String },
-    ToolCall { name: String, arguments: String, result: Option<String>, is_error: bool },
-    System { content: String },
-    Error { code: i32, message: String },
-}
-```
-
-- [ ] 消息列表：可滚动，自动滚动到底部（新消息到达时）
-- [ ] 输入框：支持基本编辑（光标移动、退格、Ctrl+A/E/K/U）
-- [ ] 工具调用：显示工具名、参数摘要、执行状态（进行中/完成/失败）
-- [ ] 焦点管理：Tab 切换焦点（聊天面板 ↔ 输入框）
-
-#### `event.rs` — 事件处理
-
-```rust
-pub enum AppEvent {
-    Terminal(crossterm::event::Event),  // 键盘/鼠标/resize
-    Ipc(JsonRpcMessage),                // Core 推送的消息
-    Tick,                                // 定时刷新
-}
-```
-
-- [ ] 使用 `tokio::select!` 同时监听终端事件和 IPC 事件
-- [ ] 终端事件：`crossterm::event::read()` 在独立 tokio task 中阻塞读取
-- [ ] IPC 事件：`ipc_client.read_message()` 在独立 tokio task 中异步读取
-- [ ] Tick 事件：`tokio::time::interval(50ms)` 用于 UI 刷新（20fps）
 
 #### TUI 布局
 
@@ -406,12 +448,345 @@ pub enum AppEvent {
 └────────────────────────────────────────────────────────────────┘
 ```
 
-- [ ] 左侧主面板占 70% 宽度，右侧工具面板占 30%
-- [ ] 工具面板可折叠（按 `T` 键 toggle）
-- [ ] 聊天面板支持 PageUp/PageDown 滚动
-- [ ] 流式文本实时渲染，不阻塞 UI
+#### 1.6.1 项目脚手架：依赖 + Tui 终端抽象 + TuiEvent
 
-### 1.7 TUI: `main.rs` 入口
+> 目标：TUI crate 可编译，终端能进入/退出 raw mode，键盘事件可异步读取
+
+- [ ] `tui/Cargo.toml` 添加依赖：
+
+```toml
+[dependencies]
+crown-core = { path = "../core" }   # 仅用于共享类型定义（Message、ToolCall 等），不依赖业务逻辑
+ratatui = "0.29"
+crossterm = { version = "0.28", features = ["bracketed-paste", "event-stream"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "sync", "macros"] }
+interprocess = { version = "2", features = ["tokio"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+tui-textarea = "0.7"   # 多行文本输入组件（参考 codex 的 ChatComposer）
+```
+
+- [ ] `tui/src/tui.rs` — Tui 终端抽象：
+  - `Tui::init()`：进入 raw mode、启用 bracketed paste、切换 alternate screen
+  - `Tui::restore()`：恢复终端状态（Drop 自动调用）
+  - `Tui::enter_alt_screen()` / `leave_alt_screen()`
+  - `Tui::draw<F>(&mut self, f: F)`：渲染帧 + 同步 viewport
+  - `Tui::event_stream()`：返回 `impl Stream<Item = TuiEvent>`，内部 spawn tokio task 读取 crossterm `EventStream`，将 `crossterm::event::Event` 转换为 `TuiEvent` 发送到 mpsc channel
+  - 终端大小查询：`Tui::size()` → `Rect`
+
+- [ ] `tui/src/event.rs` — TuiEvent 枚举：
+
+```rust
+pub enum TuiEvent {
+    Key(KeyEvent),     // 键盘输入
+    Paste(String),     // 粘贴内容（bracketed paste）
+    Resize,            // 终端大小改变
+    Draw,              // 计划重绘（由帧率限制器调度）
+}
+```
+
+- [ ] 验证：`cargo build -p crown-tui` 编译通过
+
+#### 1.6.2 事件与类型基础：AppEvent + HistoryCell + Renderable
+
+> 目标：定义三层事件类型、消息 cell 类型体系、布局 trait
+
+- [ ] `tui/src/app_event.rs` — AppEvent 枚举 + AppEventSender：
+
+```rust
+pub enum AppEvent {
+    // 用户操作
+    UserMessageSent(String),
+    CancelRequested,
+    Quit,
+
+    // IPC 事件（从 core daemon 接收后转换）
+    AssistantDelta { delta: String },
+    ReasoningDelta { delta: String },
+    ToolCallStart { call_id: String, name: String, arguments: String },
+    ToolResult { call_id: String, name: String, content: String, is_error: bool },
+    Usage { input_tokens: i32, output_tokens: i32 },
+    TaskDone { summary: String },
+    Error { code: i32, message: String },
+
+    // UI 控制
+    RedrawRequested,
+}
+
+pub struct AppEventSender {
+    tx: mpsc::UnboundedSender<AppEvent>,
+}
+
+impl AppEventSender {
+    pub fn new(tx: mpsc::UnboundedSender<AppEvent>) -> Self;
+    pub fn send(&self, event: AppEvent);
+}
+```
+
+- [ ] `tui/src/history_cell.rs` — HistoryCell trait + 5 种 cell 类型：
+
+```rust
+pub trait HistoryCell: Debug + Send + Sync {
+    fn display_lines(&self, width: u16) -> Vec<Line<'static>>;
+    fn desired_height(&self, width: u16) -> u16;
+    fn is_stream_continuation(&self) -> bool;
+}
+```
+
+  - `UserMessageCell`：用户消息，`[You]` 前缀 + 内容
+  - `AssistantMessageCell`：assistant 回复，支持流式追加 delta（`append_delta(&mut self, delta: &str)`）
+  - `ToolCallCell`：工具调用（工具名 + 参数摘要 + 输出 + 状态：Running/Success/Error）
+  - `SystemMessageCell`：系统消息（灰色斜体）
+  - `ErrorCell`：错误消息（红色）
+
+- [ ] `tui/src/renderable.rs` — Renderable trait + FlexRenderable 布局引擎：
+
+```rust
+pub trait Renderable {
+    fn render(&self, area: Rect, buf: &mut Buffer);
+    fn desired_height(&self, width: u16) -> u16;
+    fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)>;
+}
+```
+
+  - `FlexRenderable`：按 flex 权重分配子区域高度/宽度，替代直接使用 ratatui `Layout`
+  - 支持水平分割（chat:tool panel = flex:fixed）和垂直分割（content:input = flex:fixed）
+
+- [ ] 验证：模块可编译，HistoryCell 各类型单元测试（display_lines 宽度换行、desired_height 计算）
+
+#### 1.6.3 IPC 客户端：连接 core daemon + 读写分离
+
+> 目标：TUI 能连接 core daemon socket，双向收发 JSON-RPC 消息
+
+- [ ] `tui/src/ipc.rs` — IpcClient：
+
+```rust
+pub struct IpcClient {
+    write_tx: mpsc::UnboundedSender<JsonRpcMessage>,  // 写端：独立 task 负责发送
+    read_rx: mpsc::UnboundedReceiver<JsonRpcMessage>,  // 读端：独立 task 负责接收
+    next_id: AtomicU64,                                // 请求 ID 自增
+}
+
+impl IpcClient {
+    pub async fn connect(socket_name: &str) -> Result<Self, IpcError>;
+    pub async fn send_request(&self, method: &str, params: Value) -> Result<Value, IpcError>;
+    pub async fn send_notification(&self, method: &str, params: Value) -> Result<(), IpcError>;
+    pub async fn read_message(&mut self) -> Option<JsonRpcMessage>;
+    pub fn is_connected(&self) -> bool;
+}
+```
+
+  - 读写分离：`connect()` 内部 spawn 两个 tokio task（读 task + 写 task），通过 mpsc channel 与主循环通信
+  - 读 task：循环 `BufReader::read_line` → `serde_json::from_str` → 发送到 `read_rx`
+  - 写 task：从 `write_rx` 接收 → `serde_json::to_string` + `\n` → `BufWriter::write_all` + `flush`
+  - socket 检测：连接前检查 socket 文件是否存在，不存在返回明确错误（提示用户启动 core daemon）
+  - 断线重连：读 task 检测到 EOF/错误时，通过 channel 通知主循环连接断开；主循环负责重连决策
+  - `send_request`：自增 `next_id`，发送后等待匹配 `id` 的响应（通过 oneshot channel 或直接在 read_rx 中匹配）
+
+- [ ] 复用 core 的 `ipc::message` 类型（通过 `crown-core` crate 依赖）
+
+- [ ] 验证：手动启动 core daemon → 运行 TUI IPC 客户端 → 发送 `create_session` → 收到 `session_id` 响应
+
+#### 1.6.4 状态管理：ChatWidget + ToolPanel + Keymap
+
+> 目标：聊天面板和工具面板的状态模型，键绑定定义
+
+- [ ] `tui/src/chatwidget.rs` — ChatWidget 状态：
+
+```rust
+pub struct ChatWidget {
+    pub cells: Vec<Box<dyn HistoryCell>>,          // 已提交的消息 cell 列表
+    pub active_cell: Option<Box<dyn HistoryCell>>,  // 当前流式活动 cell
+    pub input: String,                              // 用户输入缓冲区
+    pub input_cursor: usize,                        // 输入光标位置
+    pub scroll_offset: usize,                       // 滚动偏移（行数）
+    pub auto_scroll: bool,                          // 是否自动滚动到底部
+}
+```
+
+  - `push_cell(cell)`：提交 cell 到列表，auto_scroll 时重置 scroll_offset
+  - `start_streaming(cell)`：设置 active_cell（流式文本开始）
+  - `append_streaming(delta)`：向 active_cell 追加 delta
+  - `finish_streaming()`：将 active_cell 提交到 cells 列表，清空 active_cell
+  - `scroll_up(lines)` / `scroll_down(lines)` / `scroll_to_bottom()`
+  - 输入编辑：`input_insert_char` / `input_backspace` / `input_move_cursor` / `input_clear` / `input_submit`
+  - `visible_height()`：计算当前可见区域的总行数（cells + active_cell）
+
+- [ ] 工具面板状态（内联在 `app.rs` 中或独立文件）：
+
+```rust
+pub struct ToolPanel {
+    pub calls: Vec<ToolCallDisplay>,
+    pub visible: bool,
+    pub scroll_offset: usize,
+}
+
+pub struct ToolCallDisplay {
+    pub call_id: String,
+    pub name: String,
+    pub arguments_summary: String,  // 截断的参数摘要
+    pub status: ToolCallStatus,
+    pub output: Option<String>,
+}
+
+pub enum ToolCallStatus {
+    Running,
+    Success,
+    Error,
+}
+```
+
+- [ ] `tui/src/keymap.rs` — 键绑定定义：
+
+```rust
+pub fn handle_key(key: KeyEvent, app: &mut App) -> bool;  // 返回 true 表示已处理
+```
+
+  - 全局：Ctrl+C / Ctrl+D → `Quit`，Ctrl+X / Esc → `CancelRequested`
+  - 输入框焦点：Enter → 提交消息，Backspace/Ctrl+H → 删除字符，Ctrl+A → 行首，Ctrl+E → 行尾，Ctrl+K → 删除到行尾，Ctrl+U → 删除整行
+  - 聊天面板焦点：PageUp/PageDown → 滚动，Ctrl+End → 滚动到底部
+  - Tab → 切换焦点（聊天面板 ↔ 输入框）
+  - `T` → toggle 工具面板折叠/展开（仅在输入框非焦点时）
+
+- [ ] 验证：ChatWidget 单元测试（push/scroll/edit 操作）、Keymap 单元测试（按键映射）
+
+#### 1.6.5 UI 渲染层：各面板 ratatui Widget 实现
+
+> 目标：所有 UI 面板可通过 `render(area, frame)` 渲染到 ratatui Buffer
+
+- [ ] `tui/src/ui/mod.rs` — UI 渲染入口：
+
+```rust
+pub fn render(frame: &mut Frame, app: &App);
+```
+
+  - 使用 FlexRenderable（或 ratatui Layout）组合三区域：
+    - 顶部：状态栏（固定 1 行）
+    - 中部：聊天面板（flex:1）+ 工具面板（固定 30% 宽度，可折叠）
+    - 底部：输入栏（固定 3 行）
+
+- [ ] `tui/src/ui/status.rs` — 状态栏渲染：
+
+```
+│ crown-code │ sess:abc │ gemma4:e4b │ In:1234 Out:567 │  ● ● ● │
+```
+
+  - 显示：项目名、session_id（截断）、模型名、累计 token 用量、连接状态指示灯
+  - 连接状态：`●`(green) = Connected，`●`(yellow) = Reconnecting，`●`(red) = Disconnected
+
+- [ ] `tui/src/ui/chat.rs` — 聊天消息渲染：
+
+  - 遍历 `ChatWidget.cells` + `active_cell`，对每个 cell 调用 `display_lines(width)`
+  - 根据 `scroll_offset` 裁剪可见区域
+  - 各 cell 类型样式：
+    - `[You]` 前缀（cyan bold）+ 用户消息
+    - `[Assistant]` 前缀（green bold）+ assistant 回复
+    - 工具调用：`── tool_name ──` 标题 + 输出内容 + 状态标记
+    - 系统消息：灰色斜体
+    - 错误消息：红色
+
+- [ ] `tui/src/ui/input.rs` — 输入框渲染：
+
+```
+│ > 请输入你的任务... (Enter 发送, Ctrl+C 退出, Tab 切换焦点)       │
+```
+
+  - 显示用户输入文本 + 光标位置
+  - 输入为空时显示占位提示文本（灰色）
+  - 多行支持：输入超过一行时自动换行
+  - 底部快捷键提示行
+
+- [ ] `tui/src/ui/tools.rs` — 工具面板渲染：
+
+```
+│  Tool Calls             │
+│  ✓ read_file            │
+│    "core/src/main.rs"   │
+│    → 14 lines           │
+│  ✗ write_to_file        │
+│    (running...)         │
+```
+
+  - 每个工具调用一行：状态图标（✓/✗/⟳）+ 工具名
+  - 展开时显示：参数摘要 + 输出预览
+  - 正在执行的工具高亮显示
+  - 可折叠（`ToolPanel.visible` 控制）
+
+- [ ] `tui/src/ui/streaming.rs` — 流式文本渲染（两区模型）：
+
+  - `StreamingRenderer`：管理 raw_source → rendered_lines → stable/tail 分区
+  - `append_delta(delta: &str)`：累积 raw_source，触发重新渲染
+  - `render(area, frame, scroll_offset)`：渲染当前帧
+  - stable region：已确认的行，逐帧 drain 产生打字效果
+  - tail region：活动流式文本，持续更新
+  - 宽度变化时自动重新渲染（Resize 事件触发）
+
+- [ ] 验证：各 UI 模块编译通过，可在 test 中构造 mock 数据调用 `render()` 检查输出 buffer
+
+#### 1.6.6 App 状态机：整合所有组件 + 事件分发
+
+> 目标：App 持有所有子组件状态，实现事件处理方法，为 main.rs 事件循环提供接口
+
+- [ ] `tui/src/app.rs` — App 状态机：
+
+```rust
+pub struct App {
+    pub chat_widget: ChatWidget,
+    pub tool_panel: ToolPanel,
+    pub status: ConnectionStatus,
+    pub session_id: Option<String>,
+    pub should_quit: bool,
+    pub needs_redraw: bool,
+    pub app_event_tx: AppEventSender,
+    pub focus: FocusTarget,
+    pub input_tokens: i32,
+    pub output_tokens: i32,
+    pub model: String,
+}
+
+pub enum FocusTarget {
+    ChatPanel,
+    Input,
+}
+
+pub enum ConnectionStatus {
+    Connecting,
+    Connected,
+    Disconnected,
+    Reconnecting(u32),
+}
+```
+
+  - `App::new(session_id, app_event_tx)` → 初始化所有子组件
+  - `handle_key(key: KeyEvent)`：委托给 keymap 处理，更新状态
+  - `handle_paste(text: &str)`：插入到输入缓冲区
+  - `handle_ipc_message(msg: JsonRpcMessage)`：解析 JSON-RPC 通知/响应 → 转换为 AppEvent → 通过 `app_event_tx` 发送
+    - `assistant_text` → `AppEvent::AssistantDelta`
+    - `assistant_reasoning` → `AppEvent::ReasoningDelta`
+    - `tool_call_start` → `AppEvent::ToolCallStart`
+    - `tool_result` → `AppEvent::ToolResult`
+    - `usage` → `AppEvent::Usage`
+    - `task_done` → `AppEvent::TaskDone`
+    - `error` → `AppEvent::Error`
+  - `handle_app_event(event: AppEvent)`：处理内部事件，更新子组件状态
+    - `UserMessageSent(text)` → `chat_widget.push_cell(UserMessageCell)` + 通过 IPC 发送 `user_message`
+    - `AssistantDelta { delta }` → `chat_widget.append_streaming(delta)` + `needs_redraw = true`
+    - `ToolCallStart { .. }` → `tool_panel.calls.push(ToolCallDisplay { status: Running })`
+    - `ToolResult { .. }` → 更新对应 ToolCallDisplay 的 status/output
+    - `TaskDone { .. }` → `chat_widget.finish_streaming()` + 重置流式状态
+    - `Usage { .. }` → 累加 `input_tokens` / `output_tokens`
+    - `Error { .. }` → `chat_widget.push_cell(ErrorCell)`
+    - `Quit` → `should_quit = true`
+  - `request_redraw()`：设置 `needs_redraw = true`
+
+- [ ] 验证：App 单元测试（构造、事件处理、状态转换），cargo build 通过
+
+### 1.7 TUI: `main.rs` 入口 + 主事件循环
+
+#### 1.7.1 main.rs 入口骨架：初始化流程 + 事件循环框架
+
+> 目标：TUI 可启动、连接 core daemon、创建 session、运行事件循环、优雅退出
 
 ```rust
 #[tokio::main]
@@ -419,38 +794,118 @@ async fn main() -> anyhow::Result<()> {
     // 1. 解析 CLI 参数：--socket-path（覆盖默认 socket 路径）
     let socket_name = resolve_socket_name();
 
-    // 2. 连接 core daemon
+    // 2. 初始化终端（raw mode, bracketed paste, alternate screen）
+    let mut tui = Tui::init()?;
+    tui.enter_alt_screen();
+
+    // 3. 连接 core daemon
     let ipc = IpcClient::connect(&socket_name).await?;
 
-    // 3. 创建 session
+    // 4. 创建 session
     let session = ipc.send_request("create_session", json!({
         "cwd": std::env::current_dir()?.to_string_lossy()
     })).await?;
     let session_id = session["session_id"].as_str().unwrap().to_string();
 
-    // 4. 初始化 TUI terminal
-    let mut terminal = ratatui::init();
+    // 5. 构建 App 状态
+    let (app_event_tx, mut app_event_rx) = mpsc::unbounded_channel::<AppEvent>();
+    let mut app = App::new(session_id, AppEventSender::new(app_event_tx));
 
-    // 5. 事件循环
-    let mut app = App::new(session_id);
-    loop {
-        terminal.draw(|frame| ui::render(frame, &app))?;
+    // 6. 主事件循环（tokio::select! 监听三路事件源）
+    // ... 见 1.7.2
 
-        match event::next().await? {
-            AppEvent::Terminal(event) => app.handle_terminal_event(event),
-            AppEvent::Ipc(msg) => app.handle_ipc_message(msg),
-            AppEvent::Tick => {}
-        }
-
-        if app.should_quit { break; }
-    }
-
-    // 6. 清理
-    ratatui::restore();
+    // 7. 清理
+    tui.leave_alt_screen();
+    Tui::restore();
     ipc.send_notification("destroy_session", json!({"session_id": app.session_id})).await?;
     Ok(())
 }
 ```
+
+- [ ] CLI 参数解析：`--socket-path` 覆盖默认 socket 路径（复用 core 的 `resolve_socket_path`）
+- [ ] 初始化顺序：Tui::init → IPC connect → create_session → App::new → 进入事件循环
+- [ ] 初始化失败处理：连接超时/拒绝时显示错误信息并退出（不进入 raw mode）
+- [ ] 验证：`cargo build -p crown-tui` 编译通过
+
+#### 1.7.2 事件路由与分发：三路事件源接入
+
+> 目标：`tokio::select!` 同时监听终端事件、IPC 事件、内部事件，正确分发到 App
+
+```rust
+let mut draw_interval = tokio::time::interval(Duration::from_millis(50));
+let mut tui_events = tui.event_stream();
+
+loop {
+    tokio::select! {
+        // 终端事件（键盘、粘贴、resize）
+        Some(tui_event) = tui_events.next() => {
+            match tui_event {
+                TuiEvent::Key(key) => app.handle_key(key),
+                TuiEvent::Paste(text) => app.handle_paste(&text),
+                TuiEvent::Resize => app.request_redraw(),
+                TuiEvent::Draw => {}
+            }
+        }
+        // IPC 事件（core daemon 推送）
+        Some(msg) = ipc.read_message() => {
+            app.handle_ipc_message(msg);
+        }
+        // 内部事件（子组件通信）
+        Some(event) = app_event_rx.recv() => {
+            app.handle_app_event(event);
+        }
+        // 帧刷新
+        _ = draw_interval.tick() => {
+            // 见 1.7.3
+        }
+    }
+    if app.should_quit { break; }
+}
+```
+
+- [ ] 终端事件 → `app.handle_key()` / `app.handle_paste()` / `app.request_redraw()`
+- [ ] IPC 消息 → `app.handle_ipc_message()`：解析 JSON-RPC → 转换为 AppEvent → 发送到 app_event_tx
+- [ ] 内部事件 → `app.handle_app_event()`：更新 ChatWidget / ToolPanel / 状态
+- [ ] IPC 断连处理：`ipc.read_message()` 返回 `None` 时设置 `ConnectionStatus::Disconnected`，提示用户重连或退出
+- [ ] 验证：启动 core daemon + TUI → 输入消息 → 看到事件在三路之间正确流转
+
+#### 1.7.3 帧率控制与渲染：needs_redraw + interval 调度
+
+> 目标：20fps 渲染，needs_redraw 避免空闲时 CPU 空转
+
+```rust
+_ = draw_interval.tick() => {
+    if app.needs_redraw {
+        tui.draw(|frame| {
+            ui::render(frame, &app);
+        })?;
+        app.needs_redraw = false;
+    }
+}
+```
+
+- [ ] `tokio::time::interval(50ms)` 调度重绘（20fps 上限）
+- [ ] `needs_redraw` 标志：仅在状态变化时（收到 IPC 消息、用户输入、resize）设置为 true
+- [ ] `tui.draw()` 调用 `ui::render(frame, &app)` 完成实际渲染
+- [ ] 空闲时 `needs_redraw = false` → 跳过渲染 → CPU 不空转
+- [ ] 验证：空闲时 CPU 占用接近 0%，流式输出时 UI 刷新流畅无卡顿
+
+#### 1.7.4 优雅退出与错误恢复
+
+> 目标：各种退出/异常场景下终端状态正确恢复，不留下脏终端
+
+- [ ] **正常退出**：Ctrl+C / Ctrl+D → `AppEvent::Quit` → `should_quit = true` → 退出循环 → `leave_alt_screen` + `restore` + 发送 `destroy_session`
+- [ ] **panic 恢复**：设置 `std::panic::set_hook`，panic 时执行 `Tui::restore()` 恢复终端（避免终端卡在 raw mode）
+- [ ] **IPC 断连恢复**：
+  - 检测到断连 → 设置 `ConnectionStatus::Disconnected` → UI 显示断连提示
+  - 用户按 `R` 键 → 尝试重连（3 次，间隔 1s/2s/4s）→ 成功则恢复 `Connected`
+  - 重连失败 → 提示用户重启 core daemon，可选择退出
+- [ ] **信号处理**：SIGTERM / SIGINT（Windows: Ctrl+C）触发优雅退出流程
+- [ ] **Session 恢复**：TUI 重新连接后可选择新建 session 或恢复已有 session（通过 `list_sessions` 查询）
+- [ ] 验证：
+  - 正常退出后终端状态正常（无残留 raw mode / alternate screen）
+  - kill core daemon → TUI 显示断连 → 重启 core → 按 R 重连成功
+  - TUI panic 后终端状态正常恢复
 
 ### 1.8 端到端集成验证
 
@@ -578,14 +1033,21 @@ core/src/
 └── main.rs                     # Phase 1 重构：daemon 入口
 
 tui/src/
-├── main.rs                     # Phase 1 新增
-├── app.rs                      # Phase 1 新增
-├── event.rs                    # Phase 1 新增
-├── ipc.rs                      # Phase 1 新增
-└── ui/                         # Phase 1 新增
-    ├── mod.rs
-    ├── chat.rs
-    ├── input.rs
-    ├── tools.rs
-    └── status.rs
+├── main.rs                     # Phase 1 新增：入口 + 主事件循环
+├── app.rs                      # Phase 1 新增：App 状态机
+├── app_event.rs                # Phase 1 新增：AppEvent 枚举（内部消息总线）
+├── event.rs                    # Phase 1 新增：TuiEvent 枚举 + 终端事件流
+├── ipc.rs                      # Phase 1 新增：IPC 客户端（读写分离）
+├── chatwidget.rs               # Phase 1 新增：ChatWidget 聊天面板状态
+├── history_cell.rs             # Phase 1 新增：HistoryCell trait + 消息 cell 类型
+├── renderable.rs               # Phase 1 新增：Renderable trait + FlexRenderable 布局
+├── tui.rs                      # Phase 1 新增：Tui 终端抽象（init/restore/draw）
+├── keymap.rs                   # Phase 1 新增：键绑定定义
+├── ui/                         # Phase 1 新增
+│   ├── mod.rs                  #           UI 渲染入口
+│   ├── chat.rs                 #           聊天消息渲染
+│   ├── input.rs                #           输入框渲染
+│   ├── tools.rs                #           工具面板渲染
+│   ├── status.rs               #           状态栏渲染
+│   └── streaming.rs            #           流式文本渲染（两区模型）
 ```

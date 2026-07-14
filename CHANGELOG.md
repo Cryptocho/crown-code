@@ -1,5 +1,23 @@
 # Changelog
 
+## TUI 脚手架：终端抽象 + 事件类型 + 消息 Cell + 布局 Trait
+
+### Added
+- `tui/Cargo.toml`：添加 9 个依赖（crown-core、ratatui 0.29、crossterm 0.28、tokio、interprocess、serde、serde_json、anyhow、tui-textarea 0.7、futures-util 0.3）
+- `tui/src/event.rs`：`TuiEvent` 枚举（`Key(KeyEvent)` / `Paste(String)` / `Resize`），终端层事件类型
+- `tui/src/tui.rs`：`Tui` 终端抽象结构体，封装 crossterm `Terminal` + `EventStream` 事件读取。方法：`init()`（raw mode + alternate screen + bracketed paste + spawn 事件 task）、`restore()`（静态方法，恢复终端状态）、`enter_alt_screen()`/`leave_alt_screen()`、`draw()`、`size()`、`event_receiver()`。实现 `Drop` 自动恢复终端
+- `tui/src/app_event.rs`：`AppEvent` 枚举（11 variants：UserMessageSent/CancelRequested/Quit/AssistantDelta/ReasoningDelta/ToolCallStart/ToolResult/Usage/TaskDone/Error/RedrawRequested）+ `AppEventSender`（封装 `UnboundedSender`，实现 `Clone`）
+- `tui/src/history_cell.rs`：`HistoryCell` trait（`display_lines`/`desired_height`/`is_stream_continuation`/`append_delta`）+ 5 种 cell 类型（`UserMessageCell`/`AssistantMessageCell`/`ToolCallCell`/`SystemMessageCell`/`ErrorCell`）+ `ToolCallStatus` 枚举 + 辅助函数 `wrap_text_to_lines`（UTF-8 安全，使用 `char_indices` 断行）/ `make_line`。覆盖 `wrap_text_to_lines` 的多字节字符安全测试
+- `tui/src/renderable.rs`：`Renderable` trait（`render`/`desired_height`/`cursor_pos`）+ `FlexDirection`（Horizontal/Vertical）+ `FlexItem`（Flex/Fixed）+ `flex_layout` 布局引擎（基于 ratatui `Layout::split`）。3 个测试（垂直分割/水平分割/溢出固定优先）
+- `tui/src/main.rs`：声明所有模块 + 最小化 main（初始化 TUI + 显示 block + 等待 q/Esc 退出）
+
+### Architecture
+- `EnableBracketedPaste`/`DisableBracketedPaste` 从 `crossterm::event` 导入（非 `crossterm::terminal`），与 codex-rs 实现一致
+- `wrap_text_to_lines` 使用 `char_indices().nth(width)` 定位字符边界，避免 `remaining[..width]` 在 UTF-8 多字节字符处 panic
+- 测试覆盖：12 个单元测试（9 个 history_cell + 3 个 renderable），全部 pass
+
+- Affected files: `tui/Cargo.toml`, `tui/src/main.rs`, `tui/src/event.rs`, `tui/src/tui.rs`, `tui/src/app_event.rs`, `tui/src/history_cell.rs`, `tui/src/renderable.rs`
+
 ## Agent Loop 事件驱动化
 
 ### Added

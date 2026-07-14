@@ -277,6 +277,7 @@ mod tests {
             self.conn.read_message().await.unwrap().unwrap()
         }
 
+        #[allow(dead_code)]
         async fn read_event(&mut self) -> JsonRpcMessage {
             self.conn.read_message().await.unwrap().unwrap()
         }
@@ -480,42 +481,6 @@ mod tests {
         assert!(resp.error.is_some());
     }
 
-    #[ignore = "requires live API — user_message now delegates to AgentSession::handle_user_message"]
-    #[tokio::test]
-    async fn test_user_message_stub_events() {
-        let path = unique_socket_path();
-        let server = Arc::new(IpcServer::new(&path, make_config()).unwrap());
-
-        let srv = Arc::clone(&server);
-        tokio::spawn(async move {
-            let _ = srv.run().await;
-        });
-        tokio::time::sleep(Duration::from_millis(100)).await;
-
-        let mut client = TestClient::connect(&path).await;
-        let create_resp = client
-            .send_request("create_session", serde_json::json!({"cwd": "/tmp"}))
-            .await;
-        let binding = create_resp.result.unwrap();
-        let sid = binding["session_id"].as_str().unwrap().to_string();
-
-        let resp = client
-            .send_request(
-                "user_message",
-                serde_json::json!({"session_id": sid, "content": "hello"}),
-            )
-            .await;
-        assert_eq!(resp.result.unwrap()["ok"], true);
-
-        let evt1 = client.read_event().await;
-        assert_eq!(evt1.method.as_deref(), Some(METHOD_ASSISTANT_TEXT));
-        let params1 = evt1.params.unwrap();
-        assert_eq!(params1["delta"], "echo: hello");
-
-        let evt2 = client.read_event().await;
-        assert_eq!(evt2.method.as_deref(), Some(METHOD_TASK_DONE));
-    }
-
     #[tokio::test]
     async fn test_user_message_unowned_session() {
         let path = unique_socket_path();
@@ -644,5 +609,120 @@ let result = resp.result.unwrap();
         let sessions = binding["sessions"].as_array().unwrap();
         assert!(!sessions.is_empty());
         assert!(sessions.iter().any(|s| s["session_id"] == sid));
+    }
+
+    #[tokio::test]
+    async fn test_destroy_nonexistent_session() {
+        let path = unique_socket_path();
+        let server = Arc::new(IpcServer::new(&path, make_config()).unwrap());
+
+        let srv = Arc::clone(&server);
+        tokio::spawn(async move {
+            let _ = srv.run().await;
+        });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let mut client = TestClient::connect(&path).await;
+        let resp = client
+            .send_request("destroy_session", serde_json::json!({"session_id": "sess_fake"}))
+            .await;
+        let err = resp.error.unwrap();
+        assert_eq!(err.code, SESSION_NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_set_config_all_fields() {
+        let path = unique_socket_path();
+        let server = Arc::new(IpcServer::new(&path, make_config()).unwrap());
+
+        let srv = Arc::clone(&server);
+        tokio::spawn(async move {
+            let _ = srv.run().await;
+        });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let mut client = TestClient::connect(&path).await;
+        let resp = client
+            .send_request("set_config", serde_json::json!({
+                "base_url": "http://x",
+                "api_key": "k",
+                "model": "m",
+                "temperature": 0.5,
+                "max_tokens": 1024,
+            }))
+            .await;
+        assert_eq!(resp.result.unwrap()["ok"], true);
+
+        let cfg = server.session_manager.get_config().await;
+        assert_eq!(cfg.base_url, "http://x");
+        assert_eq!(cfg.api_key, "k");
+        assert_eq!(cfg.model, "m");
+        assert_eq!(cfg.temperature, 0.5);
+        assert_eq!(cfg.max_tokens, 1024);
+    }
+
+    #[tokio::test]
+    async fn test_set_config_no_fields() {
+        let path = unique_socket_path();
+        let server = Arc::new(IpcServer::new(&path, make_config()).unwrap());
+
+        let srv = Arc::clone(&server);
+        tokio::spawn(async move {
+            let _ = srv.run().await;
+        });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let mut client = TestClient::connect(&path).await;
+        let resp = client
+            .send_request("set_config", serde_json::json!({}))
+            .await;
+        assert_eq!(resp.result.unwrap()["ok"], true);
+    }
+
+    #[tokio::test]
+    async fn test_create_session_default_cwd() {
+        let path = unique_socket_path();
+        let server = Arc::new(IpcServer::new(&path, make_config()).unwrap());
+
+        let srv = Arc::clone(&server);
+        tokio::spawn(async move {
+            let _ = srv.run().await;
+        });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let mut client = TestClient::connect(&path).await;
+        let resp = client
+            .send_request("create_session", serde_json::json!({}))
+            .await;
+        assert!(resp.result.unwrap()["session_id"].as_str().unwrap().starts_with("sess_"));
+
+        let list = client.send_request("list_sessions", serde_json::json!({})).await;
+        let binding = list.result.unwrap();
+        let sessions = binding["sessions"].as_array().unwrap();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0]["cwd"], ".");
+    }
+
+    #[tokio::test]
+    async fn test_server_shutdown() {
+        let path = unique_socket_path();
+        let server = Arc::new(IpcServer::new(&path, make_config()).unwrap());
+
+        let srv = Arc::clone(&server);
+        let handle = tokio::spawn(async move {
+            let _ = srv.run().await;
+        });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let mut client = TestClient::connect(&path).await;
+        let resp = client.send_request("list_sessions", serde_json::json!({})).await;
+        assert!(resp.result.is_some());
+
+        server.shutdown().await.unwrap();
+
+        tokio::time::timeout(Duration::from_secs(5), handle)
+            .await
+            .expect("server should shut down")
+            .unwrap();
     }
 }

@@ -150,6 +150,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_reset_ignore_rules() {
         reset_ignore_rules();
         let lock = state().lock().unwrap();
@@ -174,6 +175,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_check_ignore_path_no_rules_file_returns_false() {
         reset_ignore_rules();
         assert!(!check_ignore_path("test.nim"));
@@ -185,6 +187,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_check_ignore_path_with_project_crownignore() {
         reset_ignore_rules();
         use std::io::Write;
@@ -206,6 +209,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_check_ignore_path_absolute_converted_to_relative() {
         reset_ignore_rules();
         use std::io::Write;

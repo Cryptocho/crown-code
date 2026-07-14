@@ -190,6 +190,10 @@ cargo llvm-cov report --summary-only
 6. Ask the user about commit message; present preview in English
 7. After confirmation, commit **ALL** changes (`git add -A`) and push
 
+## Communication
+
+- Reply in Chinese; Mermaid diagrams may be used where helpful
+
 ## Coding Style
 
 - Rust naming conventions: snake_case for functions/variables, PascalCase for types

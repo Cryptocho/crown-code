@@ -673,4 +673,96 @@ mod tests {
             assert!(reg.get_client("mock").await.is_none());
         }
     }
+
+    mod default_debug {
+        use super::*;
+
+        #[test]
+        fn test_registry_default_impl() {
+            let reg = McpRegistry::default();
+            assert_eq!(reg.server_count(), 0);
+            assert!(reg.server_names().is_empty());
+        }
+
+        #[test]
+        fn test_registry_debug_impl() {
+            let reg = McpRegistry::new();
+            let debug = format!("{:?}", reg);
+            assert!(debug.contains("server_count"));
+            assert!(debug.contains("destroyed"));
+        }
+
+        #[test]
+        fn test_server_config_default() {
+            let cfg = McpServerConfig::default();
+            assert_eq!(cfg.transport, McpTransportKind::Stdio);
+            assert!(cfg.command.is_empty());
+            assert!(cfg.enabled);
+        }
+    }
+
+    mod config_args_auth {
+        use super::*;
+
+        #[tokio::test]
+        async fn test_load_json_config_with_args() {
+            let mut reg = McpRegistry::new();
+            let json_str = r#"{"servers": {"srv": {"command": "/bin/echo", "args": ["--flag", "--port", "8080"]}}}"#;
+            assert_eq!(reg.load_json_config(json_str), McpRegistryError::Ok);
+            let args = {
+                let inner = reg.inner.lock().unwrap();
+                inner.configs["srv"].args.clone()
+            };
+            assert_eq!(args, vec!["--flag", "--port", "8080"]);
+            reg.destroy().await;
+        }
+
+        #[tokio::test]
+        async fn test_load_json_config_with_auth_token() {
+            let mut reg = McpRegistry::new();
+            let json_str = r#"{"servers": {"srv": {"command": "/bin/echo", "authToken": "secret"}}}"#;
+            assert_eq!(reg.load_json_config(json_str), McpRegistryError::Ok);
+            let auth_token = {
+                let inner = reg.inner.lock().unwrap();
+                inner.configs["srv"].auth_token.clone()
+            };
+            assert_eq!(auth_token, "secret");
+            reg.destroy().await;
+        }
+
+        #[tokio::test]
+        async fn test_load_json_config_reload() {
+            let mut reg = McpRegistry::new();
+            let json_a = r#"{"servers": {"srvA": {"command": "/bin/echo"}}}"#;
+            assert_eq!(reg.load_json_config(json_a), McpRegistryError::Ok);
+            let json_b = r#"{"servers": {"srvB": {"command": "/bin/echo"}}}"#;
+            assert_eq!(reg.load_json_config(json_b), McpRegistryError::Ok);
+            let names = reg.server_names();
+            assert!(names.contains(&"srvA".to_string()));
+            assert!(names.contains(&"srvB".to_string()));
+            reg.destroy().await;
+        }
+
+        #[tokio::test]
+        async fn test_get_client_after_destroy_idempotent() {
+            let mut reg = McpRegistry::new();
+            reg.destroy().await;
+            reg.destroy().await;
+            assert!(reg.get_client("x").await.is_none());
+        }
+
+        #[test]
+        fn test_mcp_registry_error_variants() {
+            assert_ne!(McpRegistryError::Ok, McpRegistryError::ServerNotFound);
+            assert_ne!(McpRegistryError::Ok, McpRegistryError::ServerDisabled);
+            assert_ne!(McpRegistryError::Ok, McpRegistryError::NotConnected);
+            assert_ne!(McpRegistryError::Ok, McpRegistryError::ConfigError);
+            assert_ne!(McpRegistryError::ServerNotFound, McpRegistryError::ServerDisabled);
+            assert_ne!(McpRegistryError::ServerNotFound, McpRegistryError::NotConnected);
+            assert_ne!(McpRegistryError::ServerNotFound, McpRegistryError::ConfigError);
+            assert_ne!(McpRegistryError::ServerDisabled, McpRegistryError::NotConnected);
+            assert_ne!(McpRegistryError::ServerDisabled, McpRegistryError::ConfigError);
+            assert_ne!(McpRegistryError::NotConnected, McpRegistryError::ConfigError);
+        }
+    }
 }

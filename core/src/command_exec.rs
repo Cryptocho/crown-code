@@ -476,4 +476,26 @@ mod tests {
         let result = exec_command("nonexistent_command_xyz123", &[]).await;
         assert_eq!(result.error, CommandError::ExecutionFailed);
     }
+
+    #[tokio::test]
+    async fn test_exec_command_blacklist_no_match() {
+        let result = exec_command("echo hello", &["echo world"]).await;
+        assert_eq!(result.error, CommandError::Ok);
+        assert_eq!(result.stdout.trim(), "hello");
+    }
+
+    #[tokio::test]
+    async fn test_exec_command_large_output() {
+        let result = exec_command("seq 2500", &[]).await;
+        assert_eq!(result.error, CommandError::Ok);
+        let first_line = result.stdout.lines().next().unwrap_or("");
+        let parsed: i32 = first_line.parse().unwrap_or(0);
+        assert!(parsed > 100, "expected first line > 100, got {}", parsed);
+    }
+
+    #[test]
+    fn test_split_commands_leading_separator() {
+        let result = split_commands("&& echo a");
+        assert_eq!(result, vec![" echo a"]);
+    }
 }

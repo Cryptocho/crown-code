@@ -315,4 +315,125 @@ mod tests {
         let sm = SessionManager::new(make_config());
         assert!(!sm.cancel_session("nonexistent").await);
     }
+
+    #[tokio::test]
+    async fn test_ipc_event_handler_on_assistant_text() {
+        let (tx, mut rx) = mpsc::channel(256);
+        let mut handler = IpcEventHandler::new("sess_test".to_string(), tx);
+        handler.on_assistant_text("hello");
+        let msg = rx.recv().await.unwrap();
+        assert_eq!(msg.method.as_deref(), Some(METHOD_ASSISTANT_TEXT));
+        let params = msg.params.unwrap();
+        assert_eq!(params["session_id"], "sess_test");
+        assert_eq!(params["delta"], "hello");
+    }
+
+    #[tokio::test]
+    async fn test_ipc_event_handler_on_reasoning() {
+        let (tx, mut rx) = mpsc::channel(256);
+        let mut handler = IpcEventHandler::new("sess_test".to_string(), tx);
+        handler.on_reasoning("thinking");
+        let msg = rx.recv().await.unwrap();
+        assert_eq!(msg.method.as_deref(), Some(METHOD_ASSISTANT_REASONING));
+        let params = msg.params.unwrap();
+        assert_eq!(params["session_id"], "sess_test");
+        assert_eq!(params["delta"], "thinking");
+    }
+
+    #[tokio::test]
+    async fn test_ipc_event_handler_on_tool_call_start() {
+        let (tx, mut rx) = mpsc::channel(256);
+        let mut handler = IpcEventHandler::new("sess_test".to_string(), tx);
+        handler.on_tool_call_start("call_1", "read_file", "{}");
+        let msg = rx.recv().await.unwrap();
+        assert_eq!(msg.method.as_deref(), Some(METHOD_TOOL_CALL_START));
+        let params = msg.params.unwrap();
+        assert_eq!(params["session_id"], "sess_test");
+        assert_eq!(params["call_id"], "call_1");
+        assert_eq!(params["name"], "read_file");
+        assert_eq!(params["arguments"], "{}");
+    }
+
+    #[tokio::test]
+    async fn test_ipc_event_handler_on_tool_result() {
+        let (tx, mut rx) = mpsc::channel(256);
+        let mut handler = IpcEventHandler::new("sess_test".to_string(), tx);
+        handler.on_tool_result("call_1", "read_file", "content", true);
+        let msg = rx.recv().await.unwrap();
+        assert_eq!(msg.method.as_deref(), Some(METHOD_TOOL_RESULT));
+        let params = msg.params.unwrap();
+        assert_eq!(params["session_id"], "sess_test");
+        assert_eq!(params["call_id"], "call_1");
+        assert_eq!(params["name"], "read_file");
+        assert_eq!(params["content"], "content");
+        assert_eq!(params["is_error"], true);
+    }
+
+    #[tokio::test]
+    async fn test_ipc_event_handler_on_usage() {
+        let (tx, mut rx) = mpsc::channel(256);
+        let mut handler = IpcEventHandler::new("sess_test".to_string(), tx);
+        handler.on_usage(100, 50);
+        let msg = rx.recv().await.unwrap();
+        assert_eq!(msg.method.as_deref(), Some(METHOD_USAGE));
+        let params = msg.params.unwrap();
+        assert_eq!(params["session_id"], "sess_test");
+        assert_eq!(params["input_tokens"], 100);
+        assert_eq!(params["output_tokens"], 50);
+    }
+
+    #[tokio::test]
+    async fn test_ipc_event_handler_on_task_done() {
+        let (tx, mut rx) = mpsc::channel(256);
+        let mut handler = IpcEventHandler::new("sess_test".to_string(), tx);
+        handler.on_task_done("done");
+        let msg = rx.recv().await.unwrap();
+        assert_eq!(msg.method.as_deref(), Some(METHOD_TASK_DONE));
+        let params = msg.params.unwrap();
+        assert_eq!(params["session_id"], "sess_test");
+        assert_eq!(params["summary"], "done");
+    }
+
+    #[tokio::test]
+    async fn test_ipc_event_handler_on_error() {
+        let (tx, mut rx) = mpsc::channel(256);
+        let mut handler = IpcEventHandler::new("sess_test".to_string(), tx);
+        handler.on_error(42, "boom");
+        let msg = rx.recv().await.unwrap();
+        assert_eq!(msg.method.as_deref(), Some(METHOD_ERROR));
+        let params = msg.params.unwrap();
+        assert_eq!(params["session_id"], "sess_test");
+        assert_eq!(params["code"], 42);
+        assert_eq!(params["message"], "boom");
+    }
+
+    #[tokio::test]
+    async fn test_generate_session_id_format() {
+        let sm = SessionManager::new(make_config());
+        let (tx, _rx) = mpsc::channel(256);
+        let id = sm.create_session("/tmp".to_string(), tx).await;
+        assert!(id.starts_with("sess_"));
+        assert_eq!(id.len(), 17);
+    }
+
+    #[test]
+    fn test_session_info_serialization() {
+        let info = SessionInfo {
+            session_id: "sess_test123".to_string(),
+            cwd: "/tmp".to_string(),
+            created_at: 1000,
+            message_count: 5,
+        };
+        let json = serde_json::to_value(&info).unwrap();
+        assert_eq!(json["session_id"], "sess_test123");
+        assert_eq!(json["cwd"], "/tmp");
+        assert_eq!(json["created_at"], 1000);
+        assert_eq!(json["message_count"], 5);
+
+        let deserialized: SessionInfo = serde_json::from_value(json).unwrap();
+        assert_eq!(deserialized.session_id, info.session_id);
+        assert_eq!(deserialized.cwd, info.cwd);
+        assert_eq!(deserialized.created_at, info.created_at);
+        assert_eq!(deserialized.message_count, info.message_count);
+    }
 }

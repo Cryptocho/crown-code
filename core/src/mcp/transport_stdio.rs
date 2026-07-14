@@ -192,4 +192,81 @@ mod tests {
         assert!(status.is_ok());
         assert!(status.unwrap().is_some());
     }
+
+    #[tokio::test]
+    async fn test_read_json_line_normal() {
+        let mut transport =
+            start_stdio_transport("echo", &["{\"jsonrpc\":\"2.0\"}"]).expect("should spawn");
+        let result = read_json_line(&mut transport, 5000).await;
+        assert_eq!(result.error, TransportError::Ok);
+        assert_eq!(result.line, "{\"jsonrpc\":\"2.0\"}");
+        close(&mut transport).await;
+    }
+
+    #[tokio::test]
+    async fn test_read_json_line_strips_crlf() {
+        let mut transport = start_stdio_transport("printf", &["line\r\n"]).expect("should spawn printf");
+        let result = read_json_line(&mut transport, 5000).await;
+        assert_eq!(result.error, TransportError::Ok);
+        assert_eq!(result.line, "line");
+        close(&mut transport).await;
+    }
+
+    #[tokio::test]
+    async fn test_write_json_line_success() {
+        let mut transport = start_stdio_transport("cat", &[]).expect("should spawn cat");
+        let err = write_json_line(&mut transport, "{\"test\":1}").await;
+        assert_eq!(err, TransportError::Ok);
+        let result = read_json_line(&mut transport, 5000).await;
+        assert_eq!(result.error, TransportError::Ok);
+        assert_eq!(result.line, "{\"test\":1}");
+        close(&mut transport).await;
+    }
+
+    #[tokio::test]
+    async fn test_write_json_line_error() {
+        let mut transport = start_stdio_transport("true", &[]).expect("should spawn true");
+        transport.child.wait().await.unwrap();
+        let err = write_json_line(&mut transport, "test").await;
+        assert_eq!(err, TransportError::WriteError);
+        close(&mut transport).await;
+    }
+
+    #[tokio::test]
+    async fn test_read_json_line_eof() {
+        let mut transport = start_stdio_transport("true", &[]).expect("should spawn true");
+        transport.child.wait().await.unwrap();
+        let result = read_json_line(&mut transport, 5000).await;
+        assert_eq!(result.error, TransportError::Eof);
+        close(&mut transport).await;
+    }
+
+    #[tokio::test]
+    async fn test_get_stderr_captures_output() {
+        let mut transport =
+            start_stdio_transport("bash", &["-c", "echo err >&2"]).expect("should spawn bash");
+        transport.child.wait().await.unwrap();
+        if let Some(handle) = transport.stderr_task.take() {
+            let _ = handle.await;
+        }
+        close(&mut transport).await;
+        let stderr = get_stderr(&transport);
+        assert!(stderr.contains("err"));
+    }
+
+    #[tokio::test]
+    async fn test_stderr_concurrent_with_stdout() {
+        let mut transport =
+            start_stdio_transport("bash", &["-c", "echo out; echo err >&2"]).expect("should spawn bash");
+        let result = read_json_line(&mut transport, 5000).await;
+        assert_eq!(result.error, TransportError::Ok);
+        assert_eq!(result.line.trim(), "out");
+        transport.child.wait().await.unwrap();
+        if let Some(handle) = transport.stderr_task.take() {
+            let _ = handle.await;
+        }
+        close(&mut transport).await;
+        let stderr = get_stderr(&transport);
+        assert!(stderr.contains("err"));
+    }
 }

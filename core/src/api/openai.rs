@@ -382,6 +382,27 @@ pub async fn create_message_stream(
 }
 
 #[cfg(test)]
+pub(crate) fn get_openrouter_api_key() -> Option<String> {
+    if let Ok(key) = std::env::var("OPENROUTER_API_KEY") {
+        let trimmed = key.trim().to_string();
+        if !trimmed.is_empty() {
+            return Some(trimmed);
+        }
+    }
+    let home = std::env::var("HOME").ok()?;
+    let bashrc = std::fs::read_to_string(format!("{}/.bashrc", home)).ok()?;
+    for line in bashrc.lines() {
+        if let Some(rest) = line.strip_prefix("export OPENROUTER_API_KEY=") {
+            let trimmed = rest.trim().trim_matches('\'').trim_matches('"').to_string();
+            if !trimmed.is_empty() {
+                return Some(trimmed);
+            }
+        }
+    }
+    None
+}
+
+#[cfg(test)]
 mod tests {
     fn sse_chunk(data: &str) -> String {
         format!("data: {}\n\n", data)
@@ -1066,25 +1087,5 @@ mod tests {
         assert!(resp.tool_calls.len() > 0);
         assert_eq!(resp.tool_calls[0].function_name, "read_file");
         assert!(received_done);
-    }
-
-    fn get_openrouter_api_key() -> Option<String> {
-        if let Ok(key) = std::env::var("OPENROUTER_API_KEY") {
-            let trimmed = key.trim().to_string();
-            if !trimmed.is_empty() {
-                return Some(trimmed);
-            }
-        }
-        let home = std::env::var("HOME").ok()?;
-        let bashrc = std::fs::read_to_string(format!("{}/.bashrc", home)).ok()?;
-        for line in bashrc.lines() {
-            if let Some(rest) = line.strip_prefix("export OPENROUTER_API_KEY=") {
-                let trimmed = rest.trim().trim_matches('\'').trim_matches('"').to_string();
-                if !trimmed.is_empty() {
-                    return Some(trimmed);
-                }
-            }
-        }
-        None
     }
 }

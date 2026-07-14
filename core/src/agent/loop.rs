@@ -1,4 +1,3 @@
-use std::io::{self, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -182,57 +181,6 @@ impl AgentSession {
     }
 }
 
-#[allow(dead_code)]
-pub async fn run_agent_loop(config: ApiClientConfig) {
-    let cwd = std::env::current_dir()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_default();
-    let cancelled = Arc::new(AtomicBool::new(false));
-    let mut session = AgentSession::new(config, cwd, cancelled);
-
-    println!("crown-code — A vibe coding tool");
-    println!("Type your task. /quit to exit.");
-
-    struct CliHandler;
-    impl AgentEventHandler for CliHandler {
-        fn on_assistant_text(&mut self, delta: &str) {
-            print!("{}", delta);
-            io::stdout().flush().unwrap();
-        }
-        fn on_reasoning(&mut self, _delta: &str) {}
-        fn on_tool_call_start(&mut self, _call_id: &str, name: &str, arguments: &str) {
-            eprintln!("[TOOL_CALL] {}({})", name, arguments);
-        }
-        fn on_tool_result(&mut self, _call_id: &str, name: &str, content: &str, _is_error: bool) {
-            eprintln!("[TOOL_RESULT] {}:\n{}\n---", name, content);
-        }
-        fn on_usage(&mut self, _input: i32, _output: i32) {}
-        fn on_task_done(&mut self, summary: &str) {
-            println!("\n[COMPLETION] {}", summary);
-            println!("--- Task finished. Enter new task or /quit ---");
-        }
-        fn on_error(&mut self, _code: i32, message: &str) {
-            eprintln!("\n[API Error] {}", message);
-        }
-    }
-
-    let mut handler = CliHandler;
-    loop {
-        print!("\nYou: ");
-        io::stdout().flush().unwrap();
-        let mut user_input = String::new();
-        match io::stdin().read_line(&mut user_input) {
-            Ok(0) => break,
-            Ok(_) => {}
-            Err(_) => break,
-        }
-        let user_input = user_input.trim().to_string();
-        if user_input.is_empty() { continue; }
-        if user_input == "/quit" || user_input == "/exit" { break; }
-        session.handle_user_message(&user_input, &mut handler).await;
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -275,7 +223,7 @@ mod tests {
 
     fn make_test_config() -> ApiClientConfig {
         ApiClientConfig {
-            base_url: "http://localhost:11434/v1".to_string(),
+            base_url: "http://127.0.0.1:1/v1".to_string(),
             api_key: String::new(),
             model: "test".to_string(),
             temperature: 0.0,
@@ -325,5 +273,38 @@ mod tests {
         assert!(!cancelled.load(Ordering::SeqCst));
         session.cancel();
         assert!(cancelled.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn test_handle_user_message_pushes_to_history() {
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let mut session = AgentSession::new(make_test_config(), "/tmp".to_string(), cancelled);
+        let mut handler = TestHandler::new();
+        session.handle_user_message("test", &mut handler).await;
+        assert_eq!(session.history_len(), 2);
+        assert_eq!(session.history[1].role, MessageRole::User);
+        assert_eq!(session.history[1].content, "test");
+    }
+
+    #[tokio::test]
+    async fn test_handle_user_message_api_error_recorded() {
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let mut session = AgentSession::new(make_test_config(), "/tmp".to_string(), cancelled);
+        let mut handler = TestHandler::new();
+        session.handle_user_message("hello", &mut handler).await;
+        assert!(handler.errors.iter().any(|(_, msg)| !msg.is_empty()));
+    }
+
+    #[test]
+    fn test_agent_session_new_with_custom_cwd() {
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let session = AgentSession::new(make_test_config(), "/custom/path".to_string(), cancelled);
+        assert!(session.history[0].content.contains("/custom/path"));
+    }
+
+    #[test]
+    fn test_agent_session_new_tools_non_empty() {
+        let tools = get_tool_definitions();
+        assert_eq!(tools.len(), 7);
     }
 }

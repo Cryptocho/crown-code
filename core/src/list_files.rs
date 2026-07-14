@@ -250,4 +250,41 @@ mod tests {
         assert!(result.did_hit_limit);
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    #[test]
+    fn test_list_files_single_entry() {
+        let dir = std::env::temp_dir().join("test_list_single");
+        let _ = std::fs::create_dir_all(&dir);
+        let _ = std::fs::write(dir.join("single.txt"), "content");
+        let result = list_files(dir.to_str().unwrap());
+        assert_eq!(result.error, ListFilesError::Success);
+        assert_eq!(result.count, 1);
+        assert_eq!(result.entries[0], "single.txt");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_list_files_hidden_files() {
+        let dir = std::env::temp_dir().join("test_list_hidden");
+        let _ = std::fs::create_dir_all(&dir);
+        let _ = std::fs::write(dir.join(".hidden"), "content");
+        let result = list_files(dir.to_str().unwrap());
+        assert_eq!(result.error, ListFilesError::Success);
+        assert_eq!(result.count, 1);
+        assert_eq!(result.entries[0], ".hidden");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_list_files_dir_entry_no_trailing_slash() {
+        let dir = std::env::temp_dir().join("test_list_notrailing");
+        let _ = std::fs::create_dir_all(&dir);
+        let _ = std::fs::create_dir_all(dir.join("subdir"));
+        let result = list_files(dir.to_str().unwrap());
+        assert_eq!(result.error, ListFilesError::Success);
+        assert_eq!(result.count, 1);
+        assert!(!result.entries[0].ends_with('/'));
+        assert_eq!(result.entries[0], "subdir");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
