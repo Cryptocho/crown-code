@@ -227,7 +227,9 @@ mod tests {
     #[tokio::test]
     async fn test_post_json_stream_connection_refused() {
         let mut t = HttpTransport::new("http://127.0.0.1:1", "token");
-        let (status, error) = t.post_json_stream(r#"{"jsonrpc":"2.0","method":"ping"}"#, |_| true).await;
+        let (status, error) = t
+            .post_json_stream(r#"{"jsonrpc":"2.0","method":"ping"}"#, |_| true)
+            .await;
         assert_eq!(status, 0);
         assert!(!error.is_empty());
     }

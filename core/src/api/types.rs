@@ -183,11 +183,20 @@ mod tests {
 
     #[test]
     fn test_message_role_from_str() {
-        assert_eq!("system".parse::<MessageRole>().unwrap(), MessageRole::System);
+        assert_eq!(
+            "system".parse::<MessageRole>().unwrap(),
+            MessageRole::System
+        );
         assert_eq!("user".parse::<MessageRole>().unwrap(), MessageRole::User);
-        assert_eq!("assistant".parse::<MessageRole>().unwrap(), MessageRole::Assistant);
+        assert_eq!(
+            "assistant".parse::<MessageRole>().unwrap(),
+            MessageRole::Assistant
+        );
         assert_eq!("tool".parse::<MessageRole>().unwrap(), MessageRole::Tool);
-        assert_eq!("developer".parse::<MessageRole>().unwrap(), MessageRole::Developer);
+        assert_eq!(
+            "developer".parse::<MessageRole>().unwrap(),
+            MessageRole::Developer
+        );
         assert!("invalid".parse::<MessageRole>().is_err());
     }
 
@@ -332,7 +341,11 @@ mod tests {
             input_tokens: 10,
             output_tokens: 5,
         };
-        if let ApiStreamChunk::Usage { input_tokens, output_tokens } = &c {
+        if let ApiStreamChunk::Usage {
+            input_tokens,
+            output_tokens,
+        } = &c
+        {
             assert_eq!(*input_tokens, 10);
             assert_eq!(*output_tokens, 5);
         } else {
@@ -436,6 +449,9 @@ mod tests {
         assert_eq!(cfg.model, "llama3");
         assert_eq!(cfg.temperature, 0.7);
         assert_eq!(cfg.max_tokens, 2048);
-        assert_eq!(cfg.stream_options.as_ref().unwrap()["include_usage"].as_bool(), Some(true));
+        assert_eq!(
+            cfg.stream_options.as_ref().unwrap()["include_usage"].as_bool(),
+            Some(true)
+        );
     }
 }

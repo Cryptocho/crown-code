@@ -205,7 +205,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_read_json_line_strips_crlf() {
-        let mut transport = start_stdio_transport("printf", &["line\r\n"]).expect("should spawn printf");
+        let mut transport =
+            start_stdio_transport("printf", &["line\r\n"]).expect("should spawn printf");
         let result = read_json_line(&mut transport, 5000).await;
         assert_eq!(result.error, TransportError::Ok);
         assert_eq!(result.line, "line");
@@ -256,8 +257,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_stderr_concurrent_with_stdout() {
-        let mut transport =
-            start_stdio_transport("bash", &["-c", "echo out; echo err >&2"]).expect("should spawn bash");
+        let mut transport = start_stdio_transport("bash", &["-c", "echo out; echo err >&2"])
+            .expect("should spawn bash");
         let result = read_json_line(&mut transport, 5000).await;
         assert_eq!(result.error, TransportError::Ok);
         assert_eq!(result.line.trim(), "out");

@@ -1,15 +1,15 @@
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::{Deserialize, Serialize};
-use tokio::sync::{mpsc, Mutex, RwLock};
+use tokio::sync::{Mutex, RwLock, mpsc};
 
 use crate::agent::r#loop::{AgentEventHandler, AgentSession};
 use crate::api::types::ApiClientConfig;
 use crate::ipc::message::{
-    make_notification, JsonRpcMessage, METHOD_ASSISTANT_REASONING, METHOD_ASSISTANT_TEXT,
-    METHOD_ERROR, METHOD_TASK_DONE, METHOD_TOOL_CALL_START, METHOD_TOOL_RESULT, METHOD_USAGE,
+    JsonRpcMessage, METHOD_ASSISTANT_REASONING, METHOD_ASSISTANT_TEXT, METHOD_ERROR,
+    METHOD_TASK_DONE, METHOD_TOOL_CALL_START, METHOD_TOOL_RESULT, METHOD_USAGE, make_notification,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,7 +33,10 @@ pub(crate) struct IpcEventHandler {
 
 impl IpcEventHandler {
     pub fn new(session_id: String, event_tx: mpsc::Sender<JsonRpcMessage>) -> Self {
-        Self { session_id, event_tx }
+        Self {
+            session_id,
+            event_tx,
+        }
     }
 }
 
@@ -154,12 +157,20 @@ impl SessionManager {
             .write()
             .await
             .insert(session_id.clone(), Arc::new(Mutex::new(state)));
-        self.cancel_flags.write().await.insert(session_id.clone(), cancelled);
+        self.cancel_flags
+            .write()
+            .await
+            .insert(session_id.clone(), cancelled);
         session_id
     }
 
     pub async fn destroy_session(&self, session_id: &str) -> Result<(), ()> {
-        self.sessions.write().await.remove(session_id).map(|_| ()).ok_or(())?;
+        self.sessions
+            .write()
+            .await
+            .remove(session_id)
+            .map(|_| ())
+            .ok_or(())?;
         self.cancel_flags.write().await.remove(session_id);
         Ok(())
     }
@@ -173,21 +184,13 @@ impl SessionManager {
         }
     }
 
-    pub async fn get_session(
-        &self,
-        session_id: &str,
-    ) -> Option<Arc<Mutex<SessionState>>> {
+    pub async fn get_session(&self, session_id: &str) -> Option<Arc<Mutex<SessionState>>> {
         self.sessions.read().await.get(session_id).cloned()
     }
 
     pub async fn list_sessions(&self) -> Vec<SessionInfo> {
-        let sessions: Vec<Arc<Mutex<SessionState>>> = self
-            .sessions
-            .read()
-            .await
-            .values()
-            .cloned()
-            .collect();
+        let sessions: Vec<Arc<Mutex<SessionState>>> =
+            self.sessions.read().await.values().cloned().collect();
         let mut result = Vec::with_capacity(sessions.len());
         for session in sessions {
             let state = session.lock().await;

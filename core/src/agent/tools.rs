@@ -136,11 +136,17 @@ fn execute_replace_in_file(args: &Value) -> String {
     if path.is_empty() {
         return "Error: path parameter is required".to_string();
     }
-    let old_str = args.get("old_string").and_then(|v| v.as_str()).unwrap_or("");
+    let old_str = args
+        .get("old_string")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     if old_str.is_empty() {
         return "Error: old_string parameter is required".to_string();
     }
-    let new_str = args.get("new_string").and_then(|v| v.as_str()).unwrap_or("");
+    let new_str = args
+        .get("new_string")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     let res = crate::file_edit::edit_file(path, old_str, new_str, false);
     if res.error != crate::file_edit::FileEditError::Success {
         return format!("Error: {}", res.error_message);
@@ -184,7 +190,10 @@ fn execute_search_files(args: &Value) -> String {
     if regex.is_empty() {
         return "Error: regex parameter is required".to_string();
     }
-    let file_pattern = args.get("file_pattern").and_then(|v| v.as_str()).unwrap_or("*");
+    let file_pattern = args
+        .get("file_pattern")
+        .and_then(|v| v.as_str())
+        .unwrap_or("*");
     let res = crate::search_files::search_files(directory, regex, file_pattern);
     if res.error != crate::search_files::SearchFilesError::Success {
         return format!("Error: {}", res.error_message);
@@ -211,7 +220,10 @@ fn execute_list_files(args: &Value) -> String {
     let mut result = lines.join("\n");
     result.push_str(&format!("\n\n{} entries", res.count));
     if res.did_hit_limit {
-        result.push_str(&format!(" (list truncated at {})", crate::list_files::MAX_LIST_ENTRIES));
+        result.push_str(&format!(
+            " (list truncated at {})",
+            crate::list_files::MAX_LIST_ENTRIES
+        ));
     }
     result
 }
@@ -248,7 +260,11 @@ mod tests {
     fn test_all_tools_have_descriptions() {
         let tools = get_tool_definitions();
         for tool in &tools {
-            assert!(!tool.description.is_empty(), "Tool {} has no description", tool.name);
+            assert!(
+                !tool.description.is_empty(),
+                "Tool {} has no description",
+                tool.name
+            );
         }
     }
 
@@ -318,7 +334,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_replace_in_file_empty_old_string() {
-        let args = serde_json::json!({"path": "/tmp/test.txt", "old_string": "", "new_string": "b"});
+        let args =
+            serde_json::json!({"path": "/tmp/test.txt", "old_string": "", "new_string": "b"});
         let result = execute_tool("replace_in_file", &args).await;
         assert_eq!(result, "Error: old_string parameter is required");
     }
@@ -428,7 +445,10 @@ mod tests {
     #[test]
     fn test_attempt_completion_requires_result() {
         let tools = get_tool_definitions();
-        let tool = tools.iter().find(|t| t.name == "attempt_completion").unwrap();
+        let tool = tools
+            .iter()
+            .find(|t| t.name == "attempt_completion")
+            .unwrap();
         let required = tool.parameters["required"].as_array().unwrap();
         assert!(required.iter().any(|r| r.as_str() == Some("result")));
     }

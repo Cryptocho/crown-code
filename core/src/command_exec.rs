@@ -2,9 +2,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, BufReader as TokioBufReader};
 use tokio::process::Command;
-use std::process::Stdio;
 
 use crate::shell_detect::detect_shells;
 
@@ -265,11 +265,8 @@ pub async fn exec_command(command: &str, blacklist: &[&str]) -> CommandResult {
     let mut exit_code = -1;
     let mut timed_out = false;
 
-    let result = tokio::time::timeout(
-        Duration::from_millis(DEFAULT_TIMEOUT_MS),
-        child.wait(),
-    )
-    .await;
+    let result =
+        tokio::time::timeout(Duration::from_millis(DEFAULT_TIMEOUT_MS), child.wait()).await;
 
     match result {
         Ok(Ok(status)) => {

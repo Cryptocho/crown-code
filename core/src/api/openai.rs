@@ -19,7 +19,10 @@ pub fn build_chat_request(client: &ApiClient, messages: &[Message], tools: &[Too
     let msg_arr: Vec<Value> = messages.iter().map(|m| m.to_json_value()).collect();
 
     let mut map = serde_json::Map::new();
-    map.insert("model".to_string(), Value::String(client.config.model.clone()));
+    map.insert(
+        "model".to_string(),
+        Value::String(client.config.model.clone()),
+    );
     map.insert("messages".to_string(), Value::Array(msg_arr));
     map.insert("stream".to_string(), Value::Bool(false));
 
@@ -126,9 +129,10 @@ pub fn parse_chat_response(body: &str) -> ApiResponse {
 
     if let Some(msg) = choice.get("message") {
         if let Some(c) = msg.get("content")
-            && !c.is_null() {
-                content = c.as_str().unwrap_or("").to_string();
-            }
+            && !c.is_null()
+        {
+            content = c.as_str().unwrap_or("").to_string();
+        }
         if let Some(tcs) = msg.get("tool_calls").and_then(|t| t.as_array()) {
             for tc in tcs {
                 let fn_obj = tc.get("function");
@@ -160,7 +164,11 @@ pub fn parse_chat_response(body: &str) -> ApiResponse {
     }
 }
 
-pub async fn create_message(client: &mut ApiClient, messages: &[Message], tools: &[Tool]) -> ApiResponse {
+pub async fn create_message(
+    client: &mut ApiClient,
+    messages: &[Message],
+    tools: &[Tool],
+) -> ApiResponse {
     let req_body = build_chat_request(client, messages, tools);
     let http_resp = client.http.post_json(&req_body.to_string()).await;
     if http_resp.status_code == 0 {
@@ -201,10 +209,7 @@ pub fn parse_stream_event(data: &str) -> Vec<ApiStreamChunk> {
     }
 
     if let Some(u) = root.get("usage") {
-        let input = u
-            .get("prompt_tokens")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0) as i32;
+        let input = u.get("prompt_tokens").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
         let output = u
             .get("completion_tokens")
             .and_then(|v| v.as_i64())
@@ -216,57 +221,57 @@ pub fn parse_stream_event(data: &str) -> Vec<ApiStreamChunk> {
     }
 
     if let Some(choices) = root.get("choices").and_then(|c| c.as_array())
-        && !choices.is_empty() {
-            let choice = &choices[0];
-            let delta = match choice.get("delta") {
-                Some(d) => d,
-                None => return vec![ApiStreamChunk::Text(String::new())],
-            };
+        && !choices.is_empty()
+    {
+        let choice = &choices[0];
+        let delta = match choice.get("delta") {
+            Some(d) => d,
+            None => return vec![ApiStreamChunk::Text(String::new())],
+        };
 
-            if let Some(rc) = delta.get("reasoning_content")
-                && !rc.is_null()
-                    && let Some(s) = rc.as_str() {
-                        return vec![ApiStreamChunk::Reasoning(s.to_string())];
-                    }
-
-            if let Some(tc_arr) = delta.get("tool_calls").and_then(|t| t.as_array())
-                && !tc_arr.is_empty() {
-                    let mut chunks = Vec::new();
-                    for tc_data in tc_arr {
-                        let mut tc = ToolCall {
-                            id: String::new(),
-                            function_name: String::new(),
-                            arguments: String::new(),
-                            tc_index: tc_data
-                                .get("index")
-                                .and_then(|i| i.as_i64())
-                                .unwrap_or(0) as i32,
-                        };
-                        if let Some(id_val) = tc_data.get("id").and_then(|i| i.as_str()) {
-                            tc.id = id_val.to_string();
-                        }
-                        if let Some(fn_obj) = tc_data.get("function") {
-                            if let Some(name_val) = fn_obj.get("name").and_then(|n| n.as_str()) {
-                                tc.function_name = name_val.to_string();
-                            }
-                            if let Some(arg_val) = fn_obj.get("arguments").and_then(|a| a.as_str())
-                            {
-                                tc.arguments = arg_val.to_string();
-                            }
-                        }
-                        chunks.push(ApiStreamChunk::ToolCall(tc));
-                    }
-                    return chunks;
-                }
-
-            if let Some(content_val) = delta.get("content")
-                && !content_val.is_null()
-                    && let Some(s) = content_val.as_str() {
-                        return vec![ApiStreamChunk::Text(s.to_string())];
-                    }
-
-            return vec![ApiStreamChunk::Text(String::new())];
+        if let Some(rc) = delta.get("reasoning_content")
+            && !rc.is_null()
+            && let Some(s) = rc.as_str()
+        {
+            return vec![ApiStreamChunk::Reasoning(s.to_string())];
         }
+
+        if let Some(tc_arr) = delta.get("tool_calls").and_then(|t| t.as_array())
+            && !tc_arr.is_empty()
+        {
+            let mut chunks = Vec::new();
+            for tc_data in tc_arr {
+                let mut tc = ToolCall {
+                    id: String::new(),
+                    function_name: String::new(),
+                    arguments: String::new(),
+                    tc_index: tc_data.get("index").and_then(|i| i.as_i64()).unwrap_or(0) as i32,
+                };
+                if let Some(id_val) = tc_data.get("id").and_then(|i| i.as_str()) {
+                    tc.id = id_val.to_string();
+                }
+                if let Some(fn_obj) = tc_data.get("function") {
+                    if let Some(name_val) = fn_obj.get("name").and_then(|n| n.as_str()) {
+                        tc.function_name = name_val.to_string();
+                    }
+                    if let Some(arg_val) = fn_obj.get("arguments").and_then(|a| a.as_str()) {
+                        tc.arguments = arg_val.to_string();
+                    }
+                }
+                chunks.push(ApiStreamChunk::ToolCall(tc));
+            }
+            return chunks;
+        }
+
+        if let Some(content_val) = delta.get("content")
+            && !content_val.is_null()
+            && let Some(s) = content_val.as_str()
+        {
+            return vec![ApiStreamChunk::Text(s.to_string())];
+        }
+
+        return vec![ApiStreamChunk::Text(String::new())];
+    }
 
     vec![ApiStreamChunk::Text(String::new())]
 }
@@ -314,14 +319,12 @@ pub async fn create_message_stream(
                     }
                     ApiStreamChunk::ToolCall(ref tc) => {
                         let tc_index = tc.tc_index;
-                        let state = tool_call_state
-                            .entry(tc_index)
-                            .or_insert_with(|| ToolCall {
-                                id: String::new(),
-                                function_name: String::new(),
-                                arguments: String::new(),
-                                tc_index,
-                            });
+                        let state = tool_call_state.entry(tc_index).or_insert_with(|| ToolCall {
+                            id: String::new(),
+                            function_name: String::new(),
+                            arguments: String::new(),
+                            tc_index,
+                        });
                         if !tc.id.is_empty() {
                             state.id = tc.id.clone();
                         }
@@ -349,7 +352,10 @@ pub async fn create_message_stream(
             true
         };
 
-        let (status_code, err_msg) = client.http.post_json_stream(&req_body.to_string(), &mut on_event).await;
+        let (status_code, err_msg) = client
+            .http
+            .post_json_stream(&req_body.to_string(), &mut on_event)
+            .await;
         if status_code != 200 {
             return ApiResponse {
                 error: ApiError {
@@ -551,10 +557,7 @@ mod tests {
         assert!(req.get("tools").is_some());
         assert_eq!(req["tools"].as_array().unwrap().len(), 1);
         assert_eq!(req["tools"][0]["type"].as_str(), Some("function"));
-        assert_eq!(
-            req["tools"][0]["function"]["name"].as_str(),
-            Some("fn1")
-        );
+        assert_eq!(req["tools"][0]["function"]["name"].as_str(), Some("fn1"));
         assert_eq!(
             req["tools"][0]["function"]["description"].as_str(),
             Some("desc")
@@ -614,10 +617,7 @@ mod tests {
         assert!(msg["content"].is_null());
         assert_eq!(msg["tool_calls"].as_array().unwrap().len(), 1);
         assert_eq!(msg["tool_calls"][0]["id"].as_str(), Some("call_1"));
-        assert_eq!(
-            msg["tool_calls"][0]["type"].as_str(),
-            Some("function")
-        );
+        assert_eq!(msg["tool_calls"][0]["type"].as_str(), Some("function"));
         assert_eq!(
             msg["tool_calls"][0]["function"]["name"].as_str(),
             Some("read_file")
@@ -701,7 +701,8 @@ mod tests {
 
     #[test]
     fn test_parse_chat_response_empty_choices() {
-        let body = r#"{"id":"chat-3","choices":[],"usage":{"prompt_tokens":5,"completion_tokens":0}}"#;
+        let body =
+            r#"{"id":"chat-3","choices":[],"usage":{"prompt_tokens":5,"completion_tokens":0}}"#;
         let resp = parse_chat_response(body);
         assert_eq!(resp.error.code, 0);
         assert!(resp.content.is_empty());
@@ -743,7 +744,8 @@ mod tests {
 
     #[test]
     fn test_parse_stream_event_text_delta_with_null_content() {
-        let data = r#"{"id":"1","choices":[{"index":0,"delta":{"content":null},"finish_reason":null}]}"#;
+        let data =
+            r#"{"id":"1","choices":[{"index":0,"delta":{"content":null},"finish_reason":null}]}"#;
         let chunks = parse_stream_event(data);
         assert_eq!(chunks.len(), 1);
         assert!(matches!(&chunks[0], ApiStreamChunk::Text(t) if t.is_empty()));
@@ -754,7 +756,9 @@ mod tests {
         let data = r#"{"id":"gen-1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"read_file","arguments":""}}]},"finish_reason":null}]}"#;
         let chunks = parse_stream_event(data);
         assert_eq!(chunks.len(), 1);
-        assert!(matches!(&chunks[0], ApiStreamChunk::ToolCall(tc) if tc.id == "call_1" && tc.function_name == "read_file"));
+        assert!(
+            matches!(&chunks[0], ApiStreamChunk::ToolCall(tc) if tc.id == "call_1" && tc.function_name == "read_file")
+        );
     }
 
     #[test]
@@ -762,7 +766,9 @@ mod tests {
         let data = r#"{"id":"gen-1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"path\": \"test.txt\"}"}}]},"finish_reason":null}]}"#;
         let chunks = parse_stream_event(data);
         assert_eq!(chunks.len(), 1);
-        assert!(matches!(&chunks[0], ApiStreamChunk::ToolCall(tc) if tc.tc_index == 0 && tc.arguments == "{\"path\": \"test.txt\"}"));
+        assert!(
+            matches!(&chunks[0], ApiStreamChunk::ToolCall(tc) if tc.tc_index == 0 && tc.arguments == "{\"path\": \"test.txt\"}")
+        );
     }
 
     #[test]
@@ -778,7 +784,13 @@ mod tests {
         let data = r#"{"usage":{"prompt_tokens":10,"completion_tokens":5}}"#;
         let chunks = parse_stream_event(data);
         assert_eq!(chunks.len(), 1);
-        assert!(matches!(&chunks[0], ApiStreamChunk::Usage { input_tokens: 10, output_tokens: 5 }));
+        assert!(matches!(
+            &chunks[0],
+            ApiStreamChunk::Usage {
+                input_tokens: 10,
+                output_tokens: 5
+            }
+        ));
     }
 
     #[test]
@@ -786,7 +798,13 @@ mod tests {
         let data = r#"{"usage":{"prompt_tokens":10}}"#;
         let chunks = parse_stream_event(data);
         assert_eq!(chunks.len(), 1);
-        assert!(matches!(&chunks[0], ApiStreamChunk::Usage { input_tokens: 10, output_tokens: 0 }));
+        assert!(matches!(
+            &chunks[0],
+            ApiStreamChunk::Usage {
+                input_tokens: 10,
+                output_tokens: 0
+            }
+        ));
     }
 
     #[test]
@@ -830,9 +848,13 @@ mod tests {
 
     #[test]
     fn test_tool_call_delta_accumulation_single_tool_cross_chunk() {
-        let sse = sse_chunk(r#"{"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"read_file","arguments":""}}]},"finish_reason":null}]}"#) +
-                  &sse_chunk(r#"{"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"path\": "}}]},"finish_reason":null}]}"#) +
-                  &sse_chunk(r#"{"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"test.txt\"}"}}]},"finish_reason":null}]}"#);
+        let sse = sse_chunk(
+            r#"{"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"read_file","arguments":""}}]},"finish_reason":null}]}"#,
+        ) + &sse_chunk(
+            r#"{"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"path\": "}}]},"finish_reason":null}]}"#,
+        ) + &sse_chunk(
+            r#"{"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"test.txt\"}"}}]},"finish_reason":null}]}"#,
+        );
         let mut parser = crate::mcp::sse::SseParser::new();
         let mut tool_calls: HashMap<i32, ToolCall> = HashMap::new();
         for evt in parser.feed(&sse) {
@@ -866,9 +888,13 @@ mod tests {
 
     #[test]
     fn test_tool_call_delta_accumulation_multi_tool_parallel() {
-        let sse = sse_chunk(r#"{"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"fn1","arguments":""}},{"index":1,"id":"call_2","type":"function","function":{"name":"fn2","arguments":""}}]},"finish_reason":null}]}"#) +
-                  &sse_chunk(r#"{"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"a\":1}"}}]},"finish_reason":null}]}"#) +
-                  &sse_chunk(r#"{"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"function":{"arguments":"{\"b\":2}"}}]},"finish_reason":null}]}"#);
+        let sse = sse_chunk(
+            r#"{"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"fn1","arguments":""}},{"index":1,"id":"call_2","type":"function","function":{"name":"fn2","arguments":""}}]},"finish_reason":null}]}"#,
+        ) + &sse_chunk(
+            r#"{"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"a\":1}"}}]},"finish_reason":null}]}"#,
+        ) + &sse_chunk(
+            r#"{"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"function":{"arguments":"{\"b\":2}"}}]},"finish_reason":null}]}"#,
+        );
         let mut parser = crate::mcp::sse::SseParser::new();
         let mut tool_calls: HashMap<i32, ToolCall> = HashMap::new();
         for evt in parser.feed(&sse) {

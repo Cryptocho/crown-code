@@ -3,14 +3,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use serde_json::Value;
-use tokio::sync::{mpsc, Mutex, watch};
+use tokio::sync::{Mutex, mpsc, watch};
 use tokio::task::JoinHandle;
 
 use crate::api::types::ApiClientConfig;
 use crate::ipc::message::{
-    make_error_response, make_response, JsonRpcMessage, METHOD_CANCEL, METHOD_CREATE_SESSION,
-    METHOD_DESTROY_SESSION, METHOD_LIST_SESSIONS, METHOD_NOT_FOUND, METHOD_SET_CONFIG,
-    METHOD_USER_MESSAGE, SESSION_NOT_FOUND,
+    JsonRpcMessage, METHOD_CANCEL, METHOD_CREATE_SESSION, METHOD_DESTROY_SESSION,
+    METHOD_LIST_SESSIONS, METHOD_NOT_FOUND, METHOD_SET_CONFIG, METHOD_USER_MESSAGE,
+    SESSION_NOT_FOUND, make_error_response, make_response,
 };
 use crate::ipc::session_manager::{IpcEventHandler, SessionManager};
 use crate::ipc::transport::{IpcConnection, IpcTransport, IpcTransportError};
@@ -32,6 +32,10 @@ impl IpcServer {
             shutdown_tx,
             handles: Arc::new(Mutex::new(Vec::new())),
         })
+    }
+
+    pub fn socket_path(&self) -> &str {
+        self.transport.socket_path()
     }
 
     pub async fn run(&self) -> Result<(), IpcTransportError> {
@@ -178,7 +182,9 @@ async fn dispatch_request(
             }
             let session = match sm.get_session(sid).await {
                 Some(s) => s,
-                None => return make_error_response(id, SESSION_NOT_FOUND, "session not found", None),
+                None => {
+                    return make_error_response(id, SESSION_NOT_FOUND, "session not found", None);
+                }
             };
 
             let sid_owned = sid.to_string();
@@ -187,7 +193,10 @@ async fn dispatch_request(
             tokio::spawn(async move {
                 let mut state = session.lock().await;
                 let mut handler = IpcEventHandler::new(sid_owned.clone(), state.event_tx.clone());
-                state.agent.handle_user_message(&content_owned, &mut handler).await;
+                state
+                    .agent
+                    .handle_user_message(&content_owned, &mut handler)
+                    .await;
                 state.info.message_count += 1;
             });
 
@@ -233,11 +242,9 @@ async fn dispatch_request(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ipc::message::{
-        make_request, METHOD_ASSISTANT_TEXT, METHOD_TASK_DONE,
-    };
-    use interprocess::local_socket::traits::tokio::Stream as StreamTrait;
+    use crate::ipc::message::{METHOD_ASSISTANT_TEXT, METHOD_TASK_DONE, make_request};
     use interprocess::local_socket::ToFsName;
+    use interprocess::local_socket::traits::tokio::Stream as StreamTrait;
 
     struct TestClient {
         conn: IpcConnection,
@@ -256,11 +263,7 @@ mod tests {
             }
         }
 
-        async fn send_request(
-            &mut self,
-            method: &str,
-            params: Value,
-        ) -> JsonRpcMessage {
+        async fn send_request(&mut self, method: &str, params: Value) -> JsonRpcMessage {
             let msg = make_request(1, method, params);
             self.conn.write_message(&msg).await.unwrap();
             self.conn.read_message().await.unwrap().unwrap()
@@ -318,7 +321,9 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         let mut client = TestClient::connect(&path).await;
-        let resp = client.send_request("list_sessions", serde_json::json!({})).await;
+        let resp = client
+            .send_request("list_sessions", serde_json::json!({}))
+            .await;
         assert!(resp.result.is_some());
     }
 
@@ -353,7 +358,9 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         let mut client = TestClient::connect(&path).await;
-        let resp = client.send_request("list_sessions", serde_json::json!({})).await;
+        let resp = client
+            .send_request("list_sessions", serde_json::json!({}))
+            .await;
         let binding = resp.result.unwrap();
         let sessions = binding["sessions"].as_array().unwrap();
         assert!(sessions.is_empty());
@@ -374,7 +381,9 @@ mod tests {
         let _create_resp = client
             .send_request("create_session", serde_json::json!({"cwd": "/tmp"}))
             .await;
-        let resp = client.send_request("list_sessions", serde_json::json!({})).await;
+        let resp = client
+            .send_request("list_sessions", serde_json::json!({}))
+            .await;
         let binding = resp.result.unwrap();
         let sessions = binding["sessions"].as_array().unwrap();
         assert_eq!(sessions.len(), 1);
@@ -403,7 +412,9 @@ mod tests {
             .await;
         assert_eq!(resp.result.unwrap()["ok"], true);
 
-        let list_resp = client.send_request("list_sessions", serde_json::json!({})).await;
+        let list_resp = client
+            .send_request("list_sessions", serde_json::json!({}))
+            .await;
         let binding = list_resp.result.unwrap();
         let sessions = binding["sessions"].as_array().unwrap();
         assert!(sessions.is_empty());
@@ -549,7 +560,9 @@ mod tests {
         let sid2 = binding2["session_id"].as_str().unwrap().to_string();
         assert_ne!(sid1, sid2);
 
-        let list = client.send_request("list_sessions", serde_json::json!({})).await;
+        let list = client
+            .send_request("list_sessions", serde_json::json!({}))
+            .await;
         let binding = list.result.unwrap();
         let sessions = binding["sessions"].as_array().unwrap();
         assert_eq!(sessions.len(), 2);
@@ -578,8 +591,8 @@ mod tests {
                         serde_json::json!({"cwd": format!("/tmp/{}", i)}),
                     )
                     .await;
-let result = resp.result.unwrap();
-                    assert!(result["session_id"].as_str().unwrap().starts_with("sess_"));
+                let result = resp.result.unwrap();
+                assert!(result["session_id"].as_str().unwrap().starts_with("sess_"));
             }));
         }
 
@@ -604,7 +617,9 @@ let result = resp.result.unwrap();
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         let mut client = TestClient::connect(&path).await;
-        let list = client.send_request("list_sessions", serde_json::json!({})).await;
+        let list = client
+            .send_request("list_sessions", serde_json::json!({}))
+            .await;
         let binding = list.result.unwrap();
         let sessions = binding["sessions"].as_array().unwrap();
         assert!(!sessions.is_empty());
@@ -624,7 +639,10 @@ let result = resp.result.unwrap();
 
         let mut client = TestClient::connect(&path).await;
         let resp = client
-            .send_request("destroy_session", serde_json::json!({"session_id": "sess_fake"}))
+            .send_request(
+                "destroy_session",
+                serde_json::json!({"session_id": "sess_fake"}),
+            )
             .await;
         let err = resp.error.unwrap();
         assert_eq!(err.code, SESSION_NOT_FOUND);
@@ -643,13 +661,16 @@ let result = resp.result.unwrap();
 
         let mut client = TestClient::connect(&path).await;
         let resp = client
-            .send_request("set_config", serde_json::json!({
-                "base_url": "http://x",
-                "api_key": "k",
-                "model": "m",
-                "temperature": 0.5,
-                "max_tokens": 1024,
-            }))
+            .send_request(
+                "set_config",
+                serde_json::json!({
+                    "base_url": "http://x",
+                    "api_key": "k",
+                    "model": "m",
+                    "temperature": 0.5,
+                    "max_tokens": 1024,
+                }),
+            )
             .await;
         assert_eq!(resp.result.unwrap()["ok"], true);
 
@@ -694,9 +715,16 @@ let result = resp.result.unwrap();
         let resp = client
             .send_request("create_session", serde_json::json!({}))
             .await;
-        assert!(resp.result.unwrap()["session_id"].as_str().unwrap().starts_with("sess_"));
+        assert!(
+            resp.result.unwrap()["session_id"]
+                .as_str()
+                .unwrap()
+                .starts_with("sess_")
+        );
 
-        let list = client.send_request("list_sessions", serde_json::json!({})).await;
+        let list = client
+            .send_request("list_sessions", serde_json::json!({}))
+            .await;
         let binding = list.result.unwrap();
         let sessions = binding["sessions"].as_array().unwrap();
         assert_eq!(sessions.len(), 1);
@@ -715,7 +743,9 @@ let result = resp.result.unwrap();
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         let mut client = TestClient::connect(&path).await;
-        let resp = client.send_request("list_sessions", serde_json::json!({})).await;
+        let resp = client
+            .send_request("list_sessions", serde_json::json!({}))
+            .await;
         assert!(resp.result.is_some());
 
         server.shutdown().await.unwrap();

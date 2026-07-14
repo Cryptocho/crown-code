@@ -149,11 +149,11 @@ impl AgentSession {
 }
 ```
 
-- [ ] 定义 `AgentEventHandler` trait
-- [ ] 将 `run_agent_loop` 重构为 `AgentSession::handle_user_message`
-- [ ] 所有 `print!` / `eprintln!` 替换为 `handler.on_*` 调用
-- [ ] 所有 `stdin.read_line` 移除，用户输入由外层 IPC 传入
-- [ ] 支持 `cancel()` 通过 `AtomicBool` 中断正在进行的 API 调用
+- [x] 定义 `AgentEventHandler` trait
+- [x] 将 `run_agent_loop` 重构为 `AgentSession::handle_user_message`
+- [x] 所有 `print!` / `eprintln!` 替换为 `handler.on_*` 调用
+- [x] 所有 `stdin.read_line` 移除，用户输入由外层 IPC 传入
+- [x] 支持 `cancel()` 通过 `AtomicBool` 中断正在进行的 API 调用
 
 ### 1.4 Core: IPC Server + Session Manager
 
@@ -212,10 +212,10 @@ impl LocalSocketTransport {
 }
 ```
 
-- [ ] 使用 `interprocess::local_socket::tokio::Listener/Stream`（跨平台）
-- [ ] 启动时自动清理残留的 socket 文件（Linux/macOS 需要，Windows named pipe 自动管理）
-- [ ] 进程退出时自动清理（signal handler + Drop）
-- [ ] 支持 graceful shutdown（SIGTERM/SIGINT / Windows Ctrl+C）
+- [x] 使用 `interprocess::local_socket::tokio::Listener/Stream`（跨平台）
+- [x] 启动时自动清理残留的 socket 文件（Linux/macOS 需要，Windows named pipe 自动管理）
+- [x] 进程退出时自动清理（signal handler + Drop）
+- [x] 支持 graceful shutdown（SIGTERM/SIGINT / Windows Ctrl+C）
 
 #### `server.rs`
 
@@ -232,9 +232,9 @@ impl IpcServer {
 }
 ```
 
-- [ ] 每个连接 spawn 一个 tokio task 处理
-- [ ] 连接 handler：循环读取消息 → 解析 JSON-RPC → 分发到对应 session → 写回响应/事件
-- [ ] 广播能力：session 产生的事件通过该 session 对应的连接推送
+- [x] 每个连接 spawn 一个 tokio task 处理
+- [x] 连接 handler：循环读取消息 → 解析 JSON-RPC → 分发到对应 session → 写回响应/事件
+- [x] 广播能力：session 产生的事件通过该 session 对应的连接推送
 
 #### `session_manager.rs`
 
@@ -254,9 +254,9 @@ impl SessionManager {
 }
 ```
 
-- [ ] session_id 生成：`nanoid` 或自增 ID + 随机后缀
-- [ ] Session 持有独立的 `AgentSession` 实例（独立 history、独立 API client）
-- [ ] 所有 session 共享同一份 API config（可通过 `set_config` 全局修改）
+- [x] session_id 生成：`nanoid` 或自增 ID + 随机后缀
+- [x] Session 持有独立的 `AgentSession` 实例（独立 history、独立 API client）
+- [x] 所有 session 共享同一份 API config（可通过 `set_config` 全局修改）
 
 ### 1.5 Core: `main.rs` 入口改造
 
@@ -279,8 +279,8 @@ async fn main() {
 }
 ```
 
-- [ ] CLI 参数解析：`--socket-path`（覆盖默认 socket 路径）、`--config`（配置文件路径）
-- [ ] 默认进入 daemon 模式（监听本地 socket）
+- [x] CLI 参数解析：`--socket-path`（覆盖默认 socket 路径）、`--config`（配置文件路径）
+- [x] 默认进入 daemon 模式（监听本地 socket）
 
 ### 1.6 TUI: 基础框架（参考 codex-rs ratatui 架构）
 
@@ -452,7 +452,7 @@ impl Tui {
 
 > 目标：TUI crate 可编译，终端能进入/退出 raw mode，键盘事件可异步读取
 
-- [ ] `tui/Cargo.toml` 添加依赖：
+- [x] `tui/Cargo.toml` 添加依赖：
 
 ```toml
 [dependencies]
@@ -467,7 +467,7 @@ anyhow = "1"
 tui-textarea = "0.7"   # 多行文本输入组件（参考 codex 的 ChatComposer）
 ```
 
-- [ ] `tui/src/tui.rs` — Tui 终端抽象：
+- [x] `tui/src/tui.rs` — Tui 终端抽象：
   - `Tui::init()`：进入 raw mode、启用 bracketed paste、切换 alternate screen
   - `Tui::restore()`：恢复终端状态（Drop 自动调用）
   - `Tui::enter_alt_screen()` / `leave_alt_screen()`
@@ -475,7 +475,7 @@ tui-textarea = "0.7"   # 多行文本输入组件（参考 codex 的 ChatCompose
   - `Tui::event_stream()`：返回 `impl Stream<Item = TuiEvent>`，内部 spawn tokio task 读取 crossterm `EventStream`，将 `crossterm::event::Event` 转换为 `TuiEvent` 发送到 mpsc channel
   - 终端大小查询：`Tui::size()` → `Rect`
 
-- [ ] `tui/src/event.rs` — TuiEvent 枚举：
+- [x] `tui/src/event.rs` — TuiEvent 枚举：
 
 ```rust
 pub enum TuiEvent {
@@ -486,13 +486,13 @@ pub enum TuiEvent {
 }
 ```
 
-- [ ] 验证：`cargo build -p crown-tui` 编译通过
+- [x] 验证：`cargo build -p crown-tui` 编译通过
 
 #### 1.6.2 事件与类型基础：AppEvent + HistoryCell + Renderable
 
 > 目标：定义三层事件类型、消息 cell 类型体系、布局 trait
 
-- [ ] `tui/src/app_event.rs` — AppEvent 枚举 + AppEventSender：
+- [x] `tui/src/app_event.rs` — AppEvent 枚举 + AppEventSender：
 
 ```rust
 pub enum AppEvent {
@@ -524,7 +524,7 @@ impl AppEventSender {
 }
 ```
 
-- [ ] `tui/src/history_cell.rs` — HistoryCell trait + 5 种 cell 类型：
+- [x] `tui/src/history_cell.rs` — HistoryCell trait + 5 种 cell 类型：
 
 ```rust
 pub trait HistoryCell: Debug + Send + Sync {
@@ -540,7 +540,7 @@ pub trait HistoryCell: Debug + Send + Sync {
   - `SystemMessageCell`：系统消息（灰色斜体）
   - `ErrorCell`：错误消息（红色）
 
-- [ ] `tui/src/renderable.rs` — Renderable trait + FlexRenderable 布局引擎：
+- [x] `tui/src/renderable.rs` — Renderable trait + FlexRenderable 布局引擎：
 
 ```rust
 pub trait Renderable {
@@ -553,40 +553,42 @@ pub trait Renderable {
   - `FlexRenderable`：按 flex 权重分配子区域高度/宽度，替代直接使用 ratatui `Layout`
   - 支持水平分割（chat:tool panel = flex:fixed）和垂直分割（content:input = flex:fixed）
 
-- [ ] 验证：模块可编译，HistoryCell 各类型单元测试（display_lines 宽度换行、desired_height 计算）
+- [x] 验证：模块可编译，HistoryCell 各类型单元测试（display_lines 宽度换行、desired_height 计算）
 
 #### 1.6.3 IPC 客户端：连接 core daemon + 读写分离
 
 > 目标：TUI 能连接 core daemon socket，双向收发 JSON-RPC 消息
 
-- [ ] `tui/src/ipc.rs` — IpcClient：
+- [x] `core/src/ipc/transport.rs` — `IpcConnection` 重构：
+  - 新增 `IpcReadHalf` / `IpcWriteHalf` 结构体，读写逻辑从 `IpcConnection` 迁移到各自结构体
+  - `IpcConnection` 内部持有 `read_half` + `write_half`，原有 API 委托调用
+  - 新增 `split(self) -> (IpcReadHalf, IpcWriteHalf)` — 零成本 move
+  - 新增 `connect(socket_path) -> Result<Self>` — 公共构造器
+  - 新增 `IpcTransportError::ConnectFailed(String)` 变体
+  - 3 个新测试：`test_connect_to_listener`、`test_connect_nonexistent`、`test_split_read_write`
 
-```rust
-pub struct IpcClient {
-    write_tx: mpsc::UnboundedSender<JsonRpcMessage>,  // 写端：独立 task 负责发送
-    read_rx: mpsc::UnboundedReceiver<JsonRpcMessage>,  // 读端：独立 task 负责接收
-    next_id: AtomicU64,                                // 请求 ID 自增
-}
+- [x] `tui/src/ipc.rs` — IPC 客户端实现：
+  - `IpcError` 枚举：`Transport`、`Disconnected`、`RequestTimeout`、`RpcError { code, message }`
+  - `IpcClient` + `IpcEventReader` 读写分离设计
+  - `connect(socket_path)` 返回 `(IpcClient, IpcEventReader)` 元组
+  - 内部 spawn read task + write task，通过 mpsc channel 通信
+  - 请求-响应关联：`pending: Arc<Mutex<HashMap<u64, oneshot::Sender>>>`
+  - `send_request`：30s 超时，返回 `Result<Value, IpcError>`
+  - `send_notification`：fire-and-forget
+  - `is_connected()`：AtomicBool 断连检测
 
-impl IpcClient {
-    pub async fn connect(socket_name: &str) -> Result<Self, IpcError>;
-    pub async fn send_request(&self, method: &str, params: Value) -> Result<Value, IpcError>;
-    pub async fn send_notification(&self, method: &str, params: Value) -> Result<(), IpcError>;
-    pub async fn read_message(&mut self) -> Option<JsonRpcMessage>;
-    pub fn is_connected(&self) -> bool;
-}
-```
+- [x] `tui/src/main.rs` — 新增 `mod ipc;`
 
-  - 读写分离：`connect()` 内部 spawn 两个 tokio task（读 task + 写 task），通过 mpsc channel 与主循环通信
-  - 读 task：循环 `BufReader::read_line` → `serde_json::from_str` → 发送到 `read_rx`
-  - 写 task：从 `write_rx` 接收 → `serde_json::to_string` + `\n` → `BufWriter::write_all` + `flush`
-  - socket 检测：连接前检查 socket 文件是否存在，不存在返回明确错误（提示用户启动 core daemon）
-  - 断线重连：读 task 检测到 EOF/错误时，通过 channel 通知主循环连接断开；主循环负责重连决策
-  - `send_request`：自增 `next_id`，发送后等待匹配 `id` 的响应（通过 oneshot channel 或直接在 read_rx 中匹配）
+- [x] `tui/Cargo.toml` — `[dev-dependencies]` 新增 `nanoid = "0.4"`
 
-- [ ] 复用 core 的 `ipc::message` 类型（通过 `crown-core` crate 依赖）
-
-- [ ] 验证：手动启动 core daemon → 运行 TUI IPC 客户端 → 发送 `create_session` → 收到 `session_id` 响应
+- [x] 7 个测试全覆盖：
+  - `test_connect_and_create_session`：connect → send_request("create_session") → session_id 以 "sess_" 开头
+  - `test_send_notification`：connect → send_notification → send_request → 正常响应
+  - `test_request_error_response`：connect → send_request("nonexistent_method") → RpcError 含 "unknown method"
+  - `test_send_request_after_disconnect`：connect → server.shutdown() → is_connected() == false
+  - `test_read_message_returns_none_on_disconnect`：connect → drop client → read_message() 返回 None
+  - `test_connect_to_nonexistent_socket`：connect("/tmp/nonexistent.sock") → Err(ConnectFailed)
+  - `test_multiple_concurrent_requests`：connect → tokio::join!(send_request×2) → 各自正确响应
 
 #### 1.6.4 状态管理：ChatWidget + ToolPanel + Keymap
 

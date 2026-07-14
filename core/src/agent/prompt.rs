@@ -10,18 +10,28 @@ pub fn build_system_prompt(cwd: &str) -> String {
     let os_name = std::env::consts::OS;
 
     let mut prompt = String::new();
-    prompt.push_str("You are Crown Code, a highly skilled software engineer with extensive knowledge ");
-    prompt.push_str("in many programming languages, frameworks, design patterns, and best practices.\n\n");
+    prompt.push_str(
+        "You are Crown Code, a highly skilled software engineer with extensive knowledge ",
+    );
+    prompt.push_str(
+        "in many programming languages, frameworks, design patterns, and best practices.\n\n",
+    );
 
     prompt.push_str("TOOL USE\n");
-    prompt.push_str("You have access to a set of tools that are executed upon the user's approval. ");
-    prompt.push_str("To use a tool, respond with a tool call in the OpenAI function calling format. ");
-    prompt.push_str("After each tool use, you will receive the result. Continue using tools until ");
+    prompt
+        .push_str("You have access to a set of tools that are executed upon the user's approval. ");
+    prompt.push_str(
+        "To use a tool, respond with a tool call in the OpenAI function calling format. ",
+    );
+    prompt
+        .push_str("After each tool use, you will receive the result. Continue using tools until ");
     prompt.push_str("the task is complete, then use the attempt_completion tool.\n\n");
 
     prompt.push_str("AVAILABLE TOOLS\n");
     prompt.push_str("- read_file(path, start_line?, end_line?): Read the contents of a file at the specified path.\n");
-    prompt.push_str("- write_to_file(path, content): Write content to a file at the specified path.\n");
+    prompt.push_str(
+        "- write_to_file(path, content): Write content to a file at the specified path.\n",
+    );
     prompt.push_str("- replace_in_file(path, old_string, new_string): Replace exact string matches in a file.\n");
     prompt.push_str("- execute_command(command): Execute a shell command on the system.\n");
     prompt.push_str("- search_files(directory, regex, file_pattern?): Search for regex pattern matches in files.\n");

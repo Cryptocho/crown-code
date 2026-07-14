@@ -1,5 +1,5 @@
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::agent::prompt::build_system_prompt;
 use crate::agent::tools::{execute_tool, get_tool_definitions};
@@ -36,7 +36,13 @@ impl AgentSession {
             tool_call_id: String::new(),
             name: String::new(),
         }];
-        Self { client, tools, history, cwd, cancelled }
+        Self {
+            client,
+            tools,
+            history,
+            cwd,
+            cancelled,
+        }
     }
 
     pub async fn handle_user_message(
@@ -62,11 +68,8 @@ impl AgentSession {
 
             let mut assistant_text = String::new();
 
-            let resp = create_message_stream(
-                &mut self.client,
-                &self.history,
-                &self.tools,
-                |chunk| {
+            let resp =
+                create_message_stream(&mut self.client, &self.history, &self.tools, |chunk| {
                     if self.cancelled.load(Ordering::SeqCst) {
                         return false;
                     }
@@ -78,16 +81,18 @@ impl AgentSession {
                         ApiStreamChunk::Reasoning(ref r) => {
                             handler.on_reasoning(r);
                         }
-                        ApiStreamChunk::Usage { input_tokens, output_tokens } => {
+                        ApiStreamChunk::Usage {
+                            input_tokens,
+                            output_tokens,
+                        } => {
                             handler.on_usage(input_tokens, output_tokens);
                         }
                         ApiStreamChunk::ToolCall(_) => {}
                         ApiStreamChunk::Done => {}
                     }
                     true
-                },
-            )
-            .await;
+                })
+                .await;
 
             if !resp.error.message.is_empty() {
                 handler.on_error(resp.error.code, &resp.error.message);
@@ -137,9 +142,7 @@ impl AgentSession {
                 handler.on_tool_result(&tc.id, &tc.function_name, &result, is_error);
 
                 if tc.function_name == "attempt_completion" {
-                    let summary = result
-                        .strip_prefix("[COMPLETION]")
-                        .unwrap_or(&result);
+                    let summary = result.strip_prefix("[COMPLETION]").unwrap_or(&result);
                     handler.on_task_done(summary);
                     has_completion = true;
                 }
@@ -206,16 +209,22 @@ mod tests {
     }
 
     impl AgentEventHandler for TestHandler {
-        fn on_assistant_text(&mut self, delta: &str) { self.texts.push(delta.to_string()); }
+        fn on_assistant_text(&mut self, delta: &str) {
+            self.texts.push(delta.to_string());
+        }
         fn on_reasoning(&mut self, _delta: &str) {}
         fn on_tool_call_start(&mut self, call_id: &str, name: &str, arguments: &str) {
-            self.tool_calls.push((call_id.to_string(), name.to_string(), arguments.to_string()));
+            self.tool_calls
+                .push((call_id.to_string(), name.to_string(), arguments.to_string()));
         }
         fn on_tool_result(&mut self, call_id: &str, _name: &str, content: &str, is_error: bool) {
-            self.tool_results.push((call_id.to_string(), content.to_string(), is_error));
+            self.tool_results
+                .push((call_id.to_string(), content.to_string(), is_error));
         }
         fn on_usage(&mut self, _input: i32, _output: i32) {}
-        fn on_task_done(&mut self, summary: &str) { self.summaries.push(summary.to_string()); }
+        fn on_task_done(&mut self, summary: &str) {
+            self.summaries.push(summary.to_string());
+        }
         fn on_error(&mut self, code: i32, message: &str) {
             self.errors.push((code, message.to_string()));
         }

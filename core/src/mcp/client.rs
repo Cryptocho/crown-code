@@ -1,13 +1,13 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::mcp::jsonrpc;
 use crate::mcp::transport_http::HttpTransport;
 use crate::mcp::transport_stdio::{
-    close as stdio_close, read_json_line, start_stdio_transport, write_json_line, StdioTransport,
-    TransportError,
+    StdioTransport, TransportError, close as stdio_close, read_json_line, start_stdio_transport,
+    write_json_line,
 };
 
 pub const DEFAULT_REQUEST_TIMEOUT: u64 = 30_000;
@@ -109,7 +109,14 @@ impl std::fmt::Debug for McpClientConfig {
             .field("command", &self.command)
             .field("args", &self.args)
             .field("server_url", &self.server_url)
-            .field("auth_token", &if self.auth_token.is_empty() { "" } else { "***" })
+            .field(
+                "auth_token",
+                &if self.auth_token.is_empty() {
+                    ""
+                } else {
+                    "***"
+                },
+            )
             .field("request_timeout_ms", &self.request_timeout_ms)
             .field("connect_timeout_ms", &self.connect_timeout_ms)
             .field("ping_interval_sec", &self.ping_interval_sec)
@@ -171,8 +178,7 @@ impl ClientInner {
                 };
 
                 if !write_ok {
-                    *self.last_error.lock().unwrap() =
-                        "sendJsonRpc: write error".to_string();
+                    *self.last_error.lock().unwrap() = "sendJsonRpc: write error".to_string();
                     return None;
                 }
 
@@ -200,9 +206,7 @@ impl ClientInner {
                         if resp.get("error").is_some() {
                             *self.last_error.lock().unwrap() = format!(
                                 "sendJsonRpc: {}",
-                                resp["error"]["message"]
-                                    .as_str()
-                                    .unwrap_or("unknown error")
+                                resp["error"]["message"].as_str().unwrap_or("unknown error")
                             );
                             return None;
                         }
@@ -253,14 +257,14 @@ impl ClientInner {
                                             );
                                             return None;
                                         }
-if let Some(resp_id) = resp["id"].as_i64()
-                                && resp_id != id
-                            {
-                                *self.last_error.lock().unwrap() =
-                                    "sendJsonRpc: response id mismatch".to_string();
-                                return None;
-                            }
-                            Some(resp.get("result").cloned().unwrap_or(Value::Null))
+                                        if let Some(resp_id) = resp["id"].as_i64()
+                                            && resp_id != id
+                                        {
+                                            *self.last_error.lock().unwrap() =
+                                                "sendJsonRpc: response id mismatch".to_string();
+                                            return None;
+                                        }
+                                        Some(resp.get("result").cloned().unwrap_or(Value::Null))
                                     }
                                     Err(_) => {
                                         *self.last_error.lock().unwrap() =
@@ -282,8 +286,7 @@ if let Some(resp_id) = resp["id"].as_i64()
                     } else {
                         format!("HTTP {}", http_resp.status_code)
                     };
-                    *self.last_error.lock().unwrap() =
-                        format!("sendJsonRpc: {}", err_details);
+                    *self.last_error.lock().unwrap() = format!("sendJsonRpc: {}", err_details);
                     return None;
                 }
 
@@ -292,9 +295,7 @@ if let Some(resp_id) = resp["id"].as_i64()
                         if resp.get("error").is_some() {
                             *self.last_error.lock().unwrap() = format!(
                                 "sendJsonRpc: {}",
-                                resp["error"]["message"]
-                                    .as_str()
-                                    .unwrap_or("unknown error")
+                                resp["error"]["message"].as_str().unwrap_or("unknown error")
                             );
                             return None;
                         }
@@ -355,7 +356,10 @@ if let Some(resp_id) = resp["id"].as_i64()
         if resp.is_none() {
             return false;
         }
-        if !self.send_notification("notifications/initialized", &Value::Null).await {
+        if !self
+            .send_notification("notifications/initialized", &Value::Null)
+            .await
+        {
             *self.last_error.lock().unwrap() = "initialize: notification failed".to_string();
             return false;
         }
@@ -398,15 +402,13 @@ if let Some(resp_id) = resp["id"].as_i64()
 
             match self.transport_kind {
                 McpTransportKind::Stdio => {
-                    let args: Vec<&str> =
-                        self.config.args.iter().map(|s| s.as_str()).collect();
+                    let args: Vec<&str> = self.config.args.iter().map(|s| s.as_str()).collect();
                     match start_stdio_transport(&self.config.command, &args) {
                         Ok(t) => {
                             *self.stdio.lock().await = Some(t);
                         }
                         Err(_) => {
-                            current_delay =
-                                std::cmp::min(current_delay * 2, MAX_RECONNECT_DELAY);
+                            current_delay = std::cmp::min(current_delay * 2, MAX_RECONNECT_DELAY);
                             continue;
                         }
                     }
@@ -465,9 +467,7 @@ if let Some(resp_id) = resp["id"].as_i64()
                     let state = *inner.state.lock().unwrap();
                     state == McpConnectionState::Connected
                 };
-                if should_reconnect
-                    && let Some(ref cb) = inner.config.on_disconnect
-                {
+                if should_reconnect && let Some(ref cb) = inner.config.on_disconnect {
                     cb();
                 }
                 if inner.reconnect().await
@@ -631,9 +631,17 @@ impl McpClient {
                     for item in content_array {
                         let kind = item["type"].as_str().unwrap_or("").to_string();
                         let (text, data, mime_type) = if kind == "text" || kind == "resource" {
-                            (item["text"].as_str().unwrap_or("").to_string(), String::new(), String::new())
+                            (
+                                item["text"].as_str().unwrap_or("").to_string(),
+                                String::new(),
+                                String::new(),
+                            )
                         } else if kind == "image" {
-                            (String::new(), item["data"].as_str().unwrap_or("").to_string(), item["mimeType"].as_str().unwrap_or("").to_string())
+                            (
+                                String::new(),
+                                item["data"].as_str().unwrap_or("").to_string(),
+                                item["mimeType"].as_str().unwrap_or("").to_string(),
+                            )
                         } else {
                             (String::new(), String::new(), String::new())
                         };
@@ -689,9 +697,7 @@ impl McpClient {
     }
 
     pub async fn destroy(&mut self) {
-        self.inner
-            .heartbeat_running
-            .store(false, Ordering::Release);
+        self.inner.heartbeat_running.store(false, Ordering::Release);
 
         match self.inner.transport_kind {
             McpTransportKind::Stdio => {
@@ -716,9 +722,7 @@ impl McpClient {
 
 impl Drop for McpClient {
     fn drop(&mut self) {
-        self.inner
-            .heartbeat_running
-            .store(false, Ordering::Release);
+        self.inner.heartbeat_running.store(false, Ordering::Release);
         if let Some(handle) = self.heartbeat_handle.take() {
             handle.abort();
         }
@@ -930,7 +934,9 @@ mod tests {
                 ..Default::default()
             };
             let mut client = McpClient::new(config).await.unwrap();
-            let result = client.call_tool("echo", &json!({"message": "hello world"})).await;
+            let result = client
+                .call_tool("echo", &json!({"message": "hello world"}))
+                .await;
             assert_eq!(result.content.len(), 1);
             assert_eq!(result.content[0].text, "hello world");
             assert!(!result.is_error);

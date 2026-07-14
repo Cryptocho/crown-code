@@ -3,9 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use serde_json::Value;
 
-use crate::mcp::client::{
-    McpClient, McpClientConfig, McpConnectionState, McpTransportKind,
-};
+use crate::mcp::client::{McpClient, McpClientConfig, McpConnectionState, McpTransportKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum McpRegistryError {
@@ -144,9 +142,7 @@ impl McpRegistry {
                 return McpRegistryError::ConfigError;
             }
 
-            let transport_str = server_val["transport"]
-                .as_str()
-                .unwrap_or("stdio");
+            let transport_str = server_val["transport"].as_str().unwrap_or("stdio");
             let transport = match transport_str {
                 "stdio" => McpTransportKind::Stdio,
                 "http" => McpTransportKind::Http,
@@ -179,18 +175,12 @@ impl McpRegistry {
             }
 
             if config.transport == McpTransportKind::Stdio && config.command.is_empty() {
-                self.set_error(&format!(
-                    "stdio server '{}' missing 'command'",
-                    server_name
-                ));
+                self.set_error(&format!("stdio server '{}' missing 'command'", server_name));
                 return McpRegistryError::ConfigError;
             }
 
             if config.transport == McpTransportKind::Http && config.server_url.is_empty() {
-                self.set_error(&format!(
-                    "http server '{}' missing 'url'",
-                    server_name
-                ));
+                self.set_error(&format!("http server '{}' missing 'url'", server_name));
                 return McpRegistryError::ConfigError;
             }
 
@@ -238,7 +228,11 @@ impl McpRegistry {
                 if let Some(inner) = weak.upgrade() {
                     let guard = inner.lock().unwrap();
                     if let Some(ref cb) = guard.status_cb {
-                        cb(&sname_clone, McpConnectionState::Disconnected, "connection lost");
+                        cb(
+                            &sname_clone,
+                            McpConnectionState::Disconnected,
+                            "connection lost",
+                        );
                     }
                 }
             }) as Box<dyn Fn() + Send + Sync>
@@ -336,8 +330,7 @@ mod tests {
         async fn test_load_json_config_after_destroy() {
             let mut reg = McpRegistry::new();
             reg.destroy().await;
-            let result =
-                reg.load_json_config(r#"{"servers": {"srv": {"command": "/bin/echo"}}}"#);
+            let result = reg.load_json_config(r#"{"servers": {"srv": {"command": "/bin/echo"}}}"#);
             assert_eq!(result, McpRegistryError::ConfigError);
         }
 
@@ -415,7 +408,10 @@ mod tests {
         #[tokio::test]
         async fn test_invalid_json_string() {
             let mut reg = McpRegistry::new();
-            assert_eq!(reg.load_json_config("{invalid"), McpRegistryError::ConfigError);
+            assert_eq!(
+                reg.load_json_config("{invalid"),
+                McpRegistryError::ConfigError
+            );
             assert!(!reg.last_error().is_empty());
             reg.destroy().await;
         }
@@ -495,7 +491,8 @@ mod tests {
         #[tokio::test]
         async fn test_enabled_defaults_to_true() {
             let mut reg = McpRegistry::new();
-            let json_str = r#"{"servers": {"default-srv": {"transport": "stdio", "command": "/bin/echo"}}}"#;
+            let json_str =
+                r#"{"servers": {"default-srv": {"transport": "stdio", "command": "/bin/echo"}}}"#;
             assert_eq!(reg.load_json_config(json_str), McpRegistryError::Ok);
             let enabled = {
                 let inner = reg.inner.lock().unwrap();
@@ -541,7 +538,8 @@ mod tests {
         #[tokio::test]
         async fn test_after_load_json_config_returns_zero() {
             let mut reg = McpRegistry::new();
-            let json_str = r#"{"servers": {"a": {"command": "/bin/a"}, "b": {"command": "/bin/b"}}}"#;
+            let json_str =
+                r#"{"servers": {"a": {"command": "/bin/a"}, "b": {"command": "/bin/b"}}}"#;
             assert_eq!(reg.load_json_config(json_str), McpRegistryError::Ok);
             assert_eq!(reg.server_count(), 0);
             reg.destroy().await;
@@ -564,7 +562,8 @@ mod tests {
         #[tokio::test]
         async fn test_disabled_server_returns_none() {
             let mut reg = McpRegistry::new();
-            let json_str = r#"{"servers": {"disabled-srv": {"command": "/bin/echo", "enabled": false}}}"#;
+            let json_str =
+                r#"{"servers": {"disabled-srv": {"command": "/bin/echo", "enabled": false}}}"#;
             assert_eq!(reg.load_json_config(json_str), McpRegistryError::Ok);
             assert!(reg.get_client("disabled-srv").await.is_none());
             assert!(reg.last_error().contains("disabled"));
@@ -720,7 +719,8 @@ mod tests {
         #[tokio::test]
         async fn test_load_json_config_with_auth_token() {
             let mut reg = McpRegistry::new();
-            let json_str = r#"{"servers": {"srv": {"command": "/bin/echo", "authToken": "secret"}}}"#;
+            let json_str =
+                r#"{"servers": {"srv": {"command": "/bin/echo", "authToken": "secret"}}}"#;
             assert_eq!(reg.load_json_config(json_str), McpRegistryError::Ok);
             let auth_token = {
                 let inner = reg.inner.lock().unwrap();
@@ -757,12 +757,30 @@ mod tests {
             assert_ne!(McpRegistryError::Ok, McpRegistryError::ServerDisabled);
             assert_ne!(McpRegistryError::Ok, McpRegistryError::NotConnected);
             assert_ne!(McpRegistryError::Ok, McpRegistryError::ConfigError);
-            assert_ne!(McpRegistryError::ServerNotFound, McpRegistryError::ServerDisabled);
-            assert_ne!(McpRegistryError::ServerNotFound, McpRegistryError::NotConnected);
-            assert_ne!(McpRegistryError::ServerNotFound, McpRegistryError::ConfigError);
-            assert_ne!(McpRegistryError::ServerDisabled, McpRegistryError::NotConnected);
-            assert_ne!(McpRegistryError::ServerDisabled, McpRegistryError::ConfigError);
-            assert_ne!(McpRegistryError::NotConnected, McpRegistryError::ConfigError);
+            assert_ne!(
+                McpRegistryError::ServerNotFound,
+                McpRegistryError::ServerDisabled
+            );
+            assert_ne!(
+                McpRegistryError::ServerNotFound,
+                McpRegistryError::NotConnected
+            );
+            assert_ne!(
+                McpRegistryError::ServerNotFound,
+                McpRegistryError::ConfigError
+            );
+            assert_ne!(
+                McpRegistryError::ServerDisabled,
+                McpRegistryError::NotConnected
+            );
+            assert_ne!(
+                McpRegistryError::ServerDisabled,
+                McpRegistryError::ConfigError
+            );
+            assert_ne!(
+                McpRegistryError::NotConnected,
+                McpRegistryError::ConfigError
+            );
         }
     }
 }

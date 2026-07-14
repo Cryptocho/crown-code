@@ -185,7 +185,7 @@ cargo llvm-cov report --summary-only
 1. Propose a plan after self verification and wait for approval
 2. Implement the plan; if unworkable at any step, stop and report
 3. Use subagent to review uncommitted code
-4. Update CHANGELOG.md (after review, not before)
+4. Update TODO.md and CHANGELOG.md (after review, not before)
 5. Check whether AGENTS.md needs updating
 6. Ask the user about commit message; present preview in English
 7. After confirmation, commit **ALL** changes (`git add -A`) and push

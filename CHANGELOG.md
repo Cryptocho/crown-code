@@ -1,5 +1,23 @@
 # Changelog
 
+## TUI IPC Client: 连接 core daemon + 读写分离 + 请求-响应关联
+
+### Added
+- `core/src/ipc/transport.rs`：新增 `IpcReadHalf`/`IpcWriteHalf` 结构体，读写逻辑从 `IpcConnection` 迁移到各自结构体；`IpcConnection` 内部持有 `read_half`/`write_half`，原有 API 委托调用；新增 `split(self) -> (IpcReadHalf, IpcWriteHalf)` 零成本 move；新增 `connect(socket_path)` 公共构造器；新增 `IpcTransportError::ConnectFailed(String)` 变体
+- `tui/src/ipc.rs`：TUI IPC 客户端模块，包含 `IpcError` 枚举（Transport/Disconnected/RequestTimeout/RpcError）、`IpcClient`（发送请求/通知）、`IpcEventReader`（接收通知），`connect()` 返回元组，内部 spawn read/write task，请求-响应关联通过 `pending: Arc<Mutex<HashMap<u64, oneshot::Sender>>>`，`send_request` 30s 超时，`is_connected()` 断连检测
+- `tui/src/ipc.rs` 测试：7 个集成测试全覆盖（connect+create_session、notification、error response、disconnect detection、nonexistent socket、concurrent requests）
+- `core/src/ipc/server.rs`：新增 `IpcServer::socket_path()` 公共方法
+
+### Refactored
+- `core/src/ipc/transport.rs`：`IpcConnection` 从直接持有 `reader`/`writer` 改为持有 `read_half`/`write_half`，读写方法委托调用
+
+### Architecture
+- 读写分离设计：`IpcClient` 通过 mpsc channel 与 write task 通信，`IpcEventReader` 通过 mpsc channel 从 read task 接收消息
+- 请求-响应关联：`send_request` 生成自增 ID，插入 pending map，通过 oneshot channel 等待匹配响应
+- 断连检测：`connected: AtomicBool` 由 read/write task 在 EOF/error 时设置为 false
+
+- Affected files: `core/src/ipc/transport.rs`, `core/src/ipc/server.rs`, `tui/src/ipc.rs`, `tui/src/main.rs`, `tui/Cargo.toml`
+
 ## TUI 脚手架：终端抽象 + 事件类型 + 消息 Cell + 布局 Trait
 
 ### Added
