@@ -114,6 +114,7 @@ pub const METHOD_CANCEL: &str = "cancel";
 pub const METHOD_DESTROY_SESSION: &str = "destroy_session";
 pub const METHOD_LIST_SESSIONS: &str = "list_sessions";
 pub const METHOD_SET_CONFIG: &str = "set_config";
+pub const METHOD_SET_AGENT_MODE: &str = "set_agent_mode";
 
 pub const METHOD_ASSISTANT_TEXT: &str = "assistant_text";
 pub const METHOD_ASSISTANT_REASONING: &str = "assistant_reasoning";

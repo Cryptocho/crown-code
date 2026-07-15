@@ -26,6 +26,7 @@ pub enum AppEvent {
     Usage {
         input_tokens: i32,
         output_tokens: i32,
+        cache_read_tokens: i32,
     },
     TaskDone {
         summary: String,

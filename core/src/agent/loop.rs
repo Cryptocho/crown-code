@@ -11,7 +11,7 @@ pub trait AgentEventHandler: Send {
     fn on_reasoning(&mut self, delta: &str);
     fn on_tool_call_start(&mut self, call_id: &str, name: &str, arguments: &str);
     fn on_tool_result(&mut self, call_id: &str, name: &str, content: &str, is_error: bool);
-    fn on_usage(&mut self, input_tokens: i32, output_tokens: i32);
+    fn on_usage(&mut self, input_tokens: i32, output_tokens: i32, cache_read_tokens: i32);
     fn on_task_done(&mut self, summary: &str);
     fn on_error(&mut self, code: i32, message: &str);
 }
@@ -84,8 +84,9 @@ impl AgentSession {
                         ApiStreamChunk::Usage {
                             input_tokens,
                             output_tokens,
+                            cache_read_tokens,
                         } => {
-                            handler.on_usage(input_tokens, output_tokens);
+                            handler.on_usage(input_tokens, output_tokens, cache_read_tokens);
                         }
                         ApiStreamChunk::ToolCall(_) => {}
                         ApiStreamChunk::Done => {}
@@ -221,7 +222,7 @@ mod tests {
             self.tool_results
                 .push((call_id.to_string(), content.to_string(), is_error));
         }
-        fn on_usage(&mut self, _input: i32, _output: i32) {}
+        fn on_usage(&mut self, _input: i32, _output: i32, _cache_read: i32) {}
         fn on_task_done(&mut self, summary: &str) {
             self.summaries.push(summary.to_string());
         }

@@ -5,4 +5,5 @@ pub enum TuiEvent {
     Key(KeyEvent),
     Paste(String),
     Resize,
+    Draw,
 }

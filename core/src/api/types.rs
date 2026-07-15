@@ -111,6 +111,7 @@ pub enum ApiStreamChunk {
     Usage {
         input_tokens: i32,
         output_tokens: i32,
+        cache_read_tokens: i32,
     },
     ToolCall(ToolCall),
     Done,
@@ -340,14 +341,17 @@ mod tests {
         let c = ApiStreamChunk::Usage {
             input_tokens: 10,
             output_tokens: 5,
+            cache_read_tokens: 3,
         };
         if let ApiStreamChunk::Usage {
             input_tokens,
             output_tokens,
+            cache_read_tokens,
         } = &c
         {
             assert_eq!(*input_tokens, 10);
             assert_eq!(*output_tokens, 5);
+            assert_eq!(*cache_read_tokens, 3);
         } else {
             panic!("expected Usage");
         }

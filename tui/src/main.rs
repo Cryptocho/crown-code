@@ -1,7 +1,9 @@
 mod app_event;
+mod chatwidget;
 mod event;
 mod history_cell;
 mod ipc;
+mod keymap;
 mod renderable;
 mod tui;
 

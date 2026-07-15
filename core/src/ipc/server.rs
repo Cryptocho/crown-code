@@ -9,8 +9,8 @@ use tokio::task::JoinHandle;
 use crate::api::types::ApiClientConfig;
 use crate::ipc::message::{
     JsonRpcMessage, METHOD_CANCEL, METHOD_CREATE_SESSION, METHOD_DESTROY_SESSION,
-    METHOD_LIST_SESSIONS, METHOD_NOT_FOUND, METHOD_SET_CONFIG, METHOD_USER_MESSAGE,
-    SESSION_NOT_FOUND, make_error_response, make_response,
+    METHOD_LIST_SESSIONS, METHOD_NOT_FOUND, METHOD_SET_AGENT_MODE, METHOD_SET_CONFIG,
+    METHOD_USER_MESSAGE, SESSION_NOT_FOUND, make_error_response, make_response,
 };
 use crate::ipc::session_manager::{IpcEventHandler, SessionManager};
 use crate::ipc::transport::{IpcConnection, IpcTransport, IpcTransportError};
@@ -228,6 +228,12 @@ async fn dispatch_request(
                 config.max_tokens = v as i32;
             }
             sm.update_config(config).await;
+            make_response(id, serde_json::json!({"ok": true}))
+        }
+        METHOD_SET_AGENT_MODE => {
+            make_response(id, serde_json::json!({"ok": true}))
+        }
+        METHOD_SET_AGENT_MODE => {
             make_response(id, serde_json::json!({"ok": true}))
         }
         _ => make_error_response(
@@ -754,5 +760,26 @@ mod tests {
             .await
             .expect("server should shut down")
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_set_agent_mode() {
+        let path = unique_socket_path();
+        let server = Arc::new(IpcServer::new(&path, make_config()).unwrap());
+
+        let srv = Arc::clone(&server);
+        tokio::spawn(async move {
+            let _ = srv.run().await;
+        });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let mut client = TestClient::connect(&path).await;
+        let resp = client
+            .send_request(
+                "set_agent_mode",
+                serde_json::json!({"session_id": "sess_test", "mode": "code"}),
+            )
+            .await;
+        assert_eq!(resp.result.unwrap()["ok"], true);
     }
 }

@@ -1,5 +1,24 @@
 # Changelog
 
+## ChatWidget + Keymap: 聊天状态管理 + 键绑定 + 工具块折叠渲染
+
+### Added
+- `tui/src/chatwidget.rs`：ChatWidget 状态管理模块。包含 `cells: Vec<Box<dyn HistoryCell>>`（已提交消息列表）、`active_cell`（流式活动 cell）、`textarea: TextArea<'static>`（用户输入）、`tool_trackers: HashMap<String, ToolCallTracker>`（工具调用追踪）。公共 API：`push_cell`、`start_streaming`/`append_streaming`/`finish_streaming`（流式生命周期）、`start_tool_call`/`finish_tool_call`（工具调用生命周期，80 字符参数摘要截断 + Instant 耗时追踪）、`scroll_up`/`scroll_down`/`scroll_to_bottom`、`input_key`/`take_input`/`input_is_empty`、`toggle_tool_expanded`/`is_tool_call`、`total_rendered_lines`。14 个单元测试
+- `tui/src/keymap.rs`：键绑定定义模块。两个纯函数 `map_input_key`/`map_chat_key` 返回 `KeyAction` 枚举（Quit/Cancel/CycleAgentMode/SubmitMessage/ScrollUp/ScrollDown/ScrollToBottom/ToggleToolExpand/FocusNext/None）。支持 `KeyEventKind::Press` 过滤（忽略 Release/Repeat）。全局快捷键（Ctrl+C/D/X/Esc/P）在两个焦点下一致。18 个单元测试，含全局快捷键一致性检查
+- `tui/src/history_cell.rs`：HistoryCell trait 扩展（新增 `finish_streaming`、`as_tool_call`/`as_tool_call_mut` 类型查询方法）。`AssistantMessageCell` 覆写 `finish_streaming`。`ToolCallCell` 重写为折叠感知渲染：折叠态单行标题（`▶/▼` + 名称 + 参数摘要 + 状态图标 + 耗时），展开态标题行 + 带行号输出。`desired_height` 在 width=0 时使用 `.max(1)` 防止 panic。10 个新增测试
+- `core/src/ipc/message.rs`：新增 `METHOD_SET_AGENT_MODE` 常量
+- `core/src/ipc/server.rs`：新增 `set_agent_mode` 暂存处理（返回 OK，后续 Phase 实现 system prompt 修改）。1 个测试
+
+### Refactored
+- `tui/src/history_cell.rs`：`ToolCallCell::display_lines` 从旧的 status icon + 参数输出模式改为折叠感知渲染（`▶/▼` + `[✓/✗/⟳ elapsed]`）。`ToolCallCell::desired_height` 在折叠态返回 1 行。`title_display_len` 使用 `.chars().count()` 而非 `.len()` 修复 Unicode 显示宽度问题
+- `tui/src/main.rs`：注册 `mod chatwidget; mod keymap;`
+
+### Bug Fixes
+- `tui/src/history_cell.rs`：`desired_height` 在 `width=0` 时 `div_ceil(0)` 导致 panic，修复为 `.div_ceil(width.max(1))`
+- `tui/src/history_cell.rs`：`ToolCallCell::display_lines` 的 `title_display_len` 使用字节计数（`.len()`），对 Unicode 字符（▶/▼/✓/✗）计算不正确，修复为 `.chars().count()`
+
+- Affected files: `tui/src/chatwidget.rs`, `tui/src/keymap.rs`, `tui/src/history_cell.rs`, `tui/src/main.rs`, `core/src/ipc/message.rs`, `core/src/ipc/server.rs`
+
 ## TUI IPC Client: 连接 core daemon + 读写分离 + 请求-响应关联
 
 ### Added

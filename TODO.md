@@ -87,12 +87,13 @@ Core 流式推送   → {"method":"assistant_text","params":{"session_id":"sess_
 
 | method | params | 说明 |
 |--------|--------|------|
-| `create_session` | `{ "cwd": string }` | 创建新 session，返回 `session_id` |
+| `create_session` | `{ "cwd": string, "model"?: string, "base_url"?: string, "api_key"?: string }` | 创建新 session，返回 `session_id`。可选 API 配置覆盖全局默认 |
 | `user_message` | `{ "session_id": string, "content": string }` | 用户发送消息 |
 | `cancel` | `{ "session_id": string }` | 取消当前任务 |
 | `destroy_session` | `{ "session_id": string }` | 销毁 session |
 | `list_sessions` | `{}` | 列出所有活跃 session |
-| `set_config` | `{ "base_url"?: string, "api_key"?: string, "model"?: string, ... }` | 修改 API 配置（全局） |
+| `set_agent_mode` | `{ "session_id": string, "mode": "plan"|"code"|"ask" }` | 切换 Agent 模式（Core 修改 system prompt，不过滤工具） |
+| `set_config` | `{ "session_id"?: string, "base_url"?: string, "api_key"?: string, "model"?: string, ... }` | 修改 API 配置（有 session_id 则覆盖该 session，否则全局） |
 
 #### Core → TUI 事件（Server Push，无需 id）
 
@@ -102,9 +103,10 @@ Core 流式推送   → {"method":"assistant_text","params":{"session_id":"sess_
 | `assistant_reasoning` | `{ "session_id": string, "delta": string }` | 模型推理过程（增量） |
 | `tool_call_start` | `{ "session_id": string, "call_id": string, "name": string, "arguments": string }` | 工具调用开始 |
 | `tool_result` | `{ "session_id": string, "call_id": string, "name": string, "content": string, "is_error": bool }` | 工具执行结果 |
-| `usage` | `{ "session_id": string, "input_tokens": int, "output_tokens": int }` | Token 用量 |
+| `usage` | `{ "session_id": string, "input_tokens": int, "output_tokens": int, "cache_read_tokens": int }` | Token 用量 |
 | `task_done` | `{ "session_id": string, "summary": string }` | 任务完成 |
 | `error` | `{ "session_id"?: string, "code": int, "message": string }` | 错误信息 |
+| `session_name_update` | `{ "session_id": string, "name": string }` | Session 名称更新（Core LLM 根据首次用户消息生成） |
 | `session_created` | `{ "session_id": string }` | Session 创建成功通知 |
 | `session_destroyed` | `{ "session_id": string }` | Session 销毁通知 |
 
@@ -128,7 +130,7 @@ pub trait AgentEventHandler: Send {
     fn on_reasoning(&mut self, delta: &str);
     fn on_tool_call_start(&mut self, call_id: &str, name: &str, arguments: &str);
     fn on_tool_result(&mut self, call_id: &str, name: &str, content: &str, is_error: bool);
-    fn on_usage(&mut self, input_tokens: i32, output_tokens: i32);
+    fn on_usage(&mut self, input_tokens: i32, output_tokens: i32, cache_read_tokens: i32);
     fn on_task_done(&mut self, summary: &str);
     fn on_error(&mut self, code: i32, message: &str);
 }
@@ -304,8 +306,8 @@ tui/src/
 │   ├── mod.rs          # UI 渲染入口（compose 各子面板）
 │   ├── chat.rs         # 聊天消息渲染（HistoryCell → ratatui Widget）
 │   ├── input.rs        # 输入框渲染
-│   ├── tools.rs        # 工具调用面板渲染
-│   ├── status.rs       # 状态栏渲染（session_id、模型名、token 用量、连接状态）
+│   ├── tools.rs        # 工具调用可折叠块渲染（内联在聊天流中）
+│   ├── status.rs       # 状态栏渲染（session 名称、token 用量、API 延迟、session 活动状态）
 │   └── streaming.rs    # 流式文本渲染（两区模型：stable scrollback + tail 活动区）
 ```
 
@@ -351,17 +353,21 @@ pub trait Renderable {
 }
 ```
 
-FlexRenderable 按 flex 权重分配子区域高度，实现自适应布局：
+FlexRenderable 按 flex 权重分配子区域高度，实现自适应布局（单面板线性流）：
 
 ```
-┌──────────────────────────────────────┬────────────────────┐
-│  ChatPanel (flex: 1)                 │  ToolPanel (flex: 0)│
-│  聊天消息 + 流式输出                   │  工具调用列表        │
-│  填充可用空间                          │  固定宽度 30%       │
-│                                      │                     │
-├──────────────────────────────────────┴────────────────────┤
-│  InputBar (flex: 0)                  固定高度              │
-│  用户输入框 + 状态提示                                       │
+┌──────────────────────────────────────────────────────────┐
+│ StatusBar (flex: 0, 固定 1 行)                            │
+├──────────────────────────────────────────────────────────┤
+│                                                          │
+│  ChatPanel (flex: 1)                                     │
+│  所有消息按时间顺序线性排列：                                │
+│  用户消息、assistant 回复、工具调用（可折叠块）、系统消息      │
+│  填充可用空间，支持滚动                                     │
+│                                                          │
+├──────────────────────────────────────────────────────────┤
+│  InputBar (flex: 0, 固定 2-3 行)                         │
+│  模型名 + Agent 模式 + 用户输入框                           │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -372,7 +378,7 @@ FlexRenderable 按 flex 权重分配子区域高度，实现自适应布局：
 pub trait HistoryCell: Debug + Send + Sync {
     fn display_lines(&self, width: u16) -> Vec<Line<'static>>;
     fn desired_height(&self, width: u16) -> u16;
-    fn is_stream_continuation(&self) -> bool;
+    fn is_stream_continuation(&self) -> bool;  // true = 该 cell 是前一个 cell 的流式续接，渲染时合并为同一消息块
 }
 
 // 实现类型
@@ -424,29 +430,49 @@ impl Tui {
 
 #### TUI 布局
 
+单面板线性流，所有内容（用户消息、assistant 回复、工具调用/结果）按时间顺序排列。工具调用以可折叠块形式内联显示。
+
 ```
 ┌────────────────────────────────────────────────────────────────┐
-│ crown-code │ sess:abc │ gemma4:e4b │ In:1234 Out:567 │  ● ● ● │ ← 状态栏
-├──────────────────────────────────────┬─────────────────────────┤
-│                                      │  Tool Calls             │
-│ [You] 读取 main.rs 并添加配置加载逻辑   │                         │
-│                                      │  ✓ read_file            │
-│ [Assistant] 我来帮你实现。首先读取文件... │    "core/src/main.rs"  │
-│                                      │    → 14 lines           │
-│   ── read_file ──                    │                         │
-│   1 | use crown_core::...;           │  ✗ write_to_file        │
-│   2 | use crown_core::...;           │    (running...)         │
-│   ...                                │                         │
-│                                      │                         │
-│ [Assistant] 文件结构清楚了，现在添加配置  │                         │
-│ 加载逻辑...                           │                         │
-│                                      │                         │
-│   ── write_to_file ── (running...)   │                         │
-│                                      │                         │
-├──────────────────────────────────────┴─────────────────────────┤
-│ > 请输入你的任务... (Enter 发送, Ctrl+C 退出, Tab 切换焦点)       │ ← 输入框
+│ 我的第一个项目 │ In:1234 Out:567 Cache R:890 │ avg:230ms │ ●   │ ← 状态栏
+├────────────────────────────────────────────────────────────────┤
+│                                                                │
+│ [You] 读取 main.rs 并添加配置加载逻辑                             │
+│                                                                │
+│ [Assistant] 我来帮你实现。首先读取当前文件结构...                    │
+│                                                                │
+│   ▶ read_file "core/src/main.rs" → 14 lines           [✓ 0.1s]│ ← 可折叠块（默认折叠）
+│                                                                │
+│   ▼ read_file "core/src/lib.rs"                      [✓ 0.08s]│ ← 可折叠块（展开状态）
+│     1 | pub mod agent;                                         │
+│     2 | pub mod api;                                           │
+│     3 | pub mod command_exec;                                  │
+│     ...                                                        │
+│                                                                │
+│ [Assistant] 文件结构清楚了，现在添加配置加载逻辑...                  │
+│                                                                │
+│   ⟳ write_to_file "core/src/main.rs"                 [running]│ ← 正在执行
+│                                                                │
+│ [Assistant] 完成！已在 main.rs 中添加配置加载逻辑。                 │
+│                                                                │
+├────────────────────────────────────────────────────────────────┤
+│ gemma4:e4b │ [Code] │ > 请输入你的任务...                        │ ← 输入框
+│ Enter 发送 · Ctrl+C 退出 · Tab 切换模式                         │
 └────────────────────────────────────────────────────────────────┘
 ```
+
+**状态栏设计**：
+- 顶部固定 1 行，信息按优先级从左到右排列，根据终端宽度自适应裁剪
+- 优先级 1：session 名称（由模型根据用户首次输入自动生成，如"我的第一个项目"）
+- 优先级 2：token 用量（`In:{input} Out:{output} Cache R:{cache_read}`）
+- 优先级 3：API 平均延迟（`avg:{ms}ms`，取最近 5 次请求平均值）
+- 优先级 4：session 活动状态指示灯（`●`(green)=active/running，`●`(blue)=completed/finished，`●`(red)=error）
+- 终端宽度不足时，按优先级从低到高隐藏信息
+
+**输入框设计**：
+- 固定 2-3 行（输入框 + 快捷键提示）
+- 左侧显示：模型名 + 当前 Agent 模式标签（`[Plan]`/`[Code]`/`[Ask]`，可切换）
+- 模型名和 Agent 模式显示在输入框上方或左侧，不占用输入空间
 
 #### 1.6.1 项目脚手架：依赖 + Tui 终端抽象 + TuiEvent
 
@@ -506,7 +532,7 @@ pub enum AppEvent {
     ReasoningDelta { delta: String },
     ToolCallStart { call_id: String, name: String, arguments: String },
     ToolResult { call_id: String, name: String, content: String, is_error: bool },
-    Usage { input_tokens: i32, output_tokens: i32 },
+    Usage { input_tokens: i32, output_tokens: i32, cache_read_tokens: i32 },
     TaskDone { summary: String },
     Error { code: i32, message: String },
 
@@ -530,13 +556,13 @@ impl AppEventSender {
 pub trait HistoryCell: Debug + Send + Sync {
     fn display_lines(&self, width: u16) -> Vec<Line<'static>>;
     fn desired_height(&self, width: u16) -> u16;
-    fn is_stream_continuation(&self) -> bool;
+    fn is_stream_continuation(&self) -> bool;  // true = 该 cell 是前一个 cell 的流式续接，渲染时合并为同一消息块
 }
 ```
 
   - `UserMessageCell`：用户消息，`[You]` 前缀 + 内容
   - `AssistantMessageCell`：assistant 回复，支持流式追加 delta（`append_delta(&mut self, delta: &str)`）
-  - `ToolCallCell`：工具调用（工具名 + 参数摘要 + 输出 + 状态：Running/Success/Error）
+  - `ToolCallCell`：工具调用（工具名 + 参数摘要 + 输出 + 状态 + 是否展开 + 耗时），内联在聊天流中，支持折叠/展开
   - `SystemMessageCell`：系统消息（灰色斜体）
   - `ErrorCell`：错误消息（红色）
 
@@ -551,7 +577,7 @@ pub trait Renderable {
 ```
 
   - `FlexRenderable`：按 flex 权重分配子区域高度/宽度，替代直接使用 ratatui `Layout`
-  - 支持水平分割（chat:tool panel = flex:fixed）和垂直分割（content:input = flex:fixed）
+  - 支持垂直分割（StatusBar:ChatPanel:InputBar = fixed:flex:fixed）
 
 - [x] 验证：模块可编译，HistoryCell 各类型单元测试（display_lines 宽度换行、desired_height 计算）
 
@@ -590,11 +616,11 @@ pub trait Renderable {
   - `test_connect_to_nonexistent_socket`：connect("/tmp/nonexistent.sock") → Err(ConnectFailed)
   - `test_multiple_concurrent_requests`：connect → tokio::join!(send_request×2) → 各自正确响应
 
-#### 1.6.4 状态管理：ChatWidget + ToolPanel + Keymap
+#### 1.6.4 状态管理：ChatWidget + Keymap
 
-> 目标：聊天面板和工具面板的状态模型，键绑定定义
+> 目标：聊天面板状态模型（含内联可折叠工具块）、键绑定定义
 
-- [ ] `tui/src/chatwidget.rs` — ChatWidget 状态：
+- [x] `tui/src/chatwidget.rs` — ChatWidget 状态：
 
 ```rust
 pub struct ChatWidget {
@@ -615,21 +641,17 @@ pub struct ChatWidget {
   - 输入编辑：`input_insert_char` / `input_backspace` / `input_move_cursor` / `input_clear` / `input_submit`
   - `visible_height()`：计算当前可见区域的总行数（cells + active_cell）
 
-- [ ] 工具面板状态（内联在 `app.rs` 中或独立文件）：
+- [x] 工具调用可折叠块状态（内联在 ChatWidget 中）：
 
 ```rust
-pub struct ToolPanel {
-    pub calls: Vec<ToolCallDisplay>,
-    pub visible: bool,
-    pub scroll_offset: usize,
-}
-
-pub struct ToolCallDisplay {
+pub struct ToolCallCell {
     pub call_id: String,
     pub name: String,
-    pub arguments_summary: String,  // 截断的参数摘要
+    pub arguments_summary: String,  // TUI 端截断到 80 字符
     pub status: ToolCallStatus,
     pub output: Option<String>,
+    pub expanded: bool,             // 是否展开显示完整输出
+    pub elapsed_ms: Option<u64>,    // 执行耗时
 }
 
 pub enum ToolCallStatus {
@@ -639,7 +661,7 @@ pub enum ToolCallStatus {
 }
 ```
 
-- [ ] `tui/src/keymap.rs` — 键绑定定义：
+- [x] `tui/src/keymap.rs` — 键绑定定义：
 
 ```rust
 pub fn handle_key(key: KeyEvent, app: &mut App) -> bool;  // 返回 true 表示已处理
@@ -647,11 +669,11 @@ pub fn handle_key(key: KeyEvent, app: &mut App) -> bool;  // 返回 true 表示�
 
   - 全局：Ctrl+C / Ctrl+D → `Quit`，Ctrl+X / Esc → `CancelRequested`
   - 输入框焦点：Enter → 提交消息，Backspace/Ctrl+H → 删除字符，Ctrl+A → 行首，Ctrl+E → 行尾，Ctrl+K → 删除到行尾，Ctrl+U → 删除整行
-  - 聊天面板焦点：PageUp/PageDown → 滚动，Ctrl+End → 滚动到底部
+  - 聊天面板焦点：PageUp/PageDown → 滚动，Ctrl+End → 滚动到底部，Enter/Space → 展开/折叠当前工具块
   - Tab → 切换焦点（聊天面板 ↔ 输入框）
-  - `T` → toggle 工具面板折叠/展开（仅在输入框非焦点时）
+  - Ctrl+P → 切换 Agent 模式（Plan → Code → Ask → Plan...）
 
-- [ ] 验证：ChatWidget 单元测试（push/scroll/edit 操作）、Keymap 单元测试（按键映射）
+- [x] 验证：ChatWidget 单元测试（push/scroll/edit 操作）、Keymap 单元测试（按键映射）
 
 #### 1.6.5 UI 渲染层：各面板 ratatui Widget 实现
 
@@ -664,18 +686,22 @@ pub fn render(frame: &mut Frame, app: &App);
 ```
 
   - 使用 FlexRenderable（或 ratatui Layout）组合三区域：
-    - 顶部：状态栏（固定 1 行）
-    - 中部：聊天面板（flex:1）+ 工具面板（固定 30% 宽度，可折叠）
-    - 底部：输入栏（固定 3 行）
+    - 顶部：状态栏（固定 1 行，按优先级自适应裁剪信息）
+    - 中部：聊天面板（flex:1），所有消息线性排列，工具调用内联为可折叠块
+    - 底部：输入栏（固定 2-3 行，含模型名 + Agent 模式标签 + 输入框 + 快捷键提示）
 
 - [ ] `tui/src/ui/status.rs` — 状态栏渲染：
 
 ```
-│ crown-code │ sess:abc │ gemma4:e4b │ In:1234 Out:567 │  ● ● ● │
+│ 我的第一个项目 │ In:1234 Out:567 Cache R:890 │ avg:230ms │ ●              │
 ```
 
-  - 显示：项目名、session_id（截断）、模型名、累计 token 用量、连接状态指示灯
-  - 连接状态：`●`(green) = Connected，`●`(yellow) = Reconnecting，`●`(red) = Disconnected
+  - 顶部固定 1 行，信息按优先级排列，根据终端宽度自适应裁剪
+  - 优先级 1：session 名称（模型根据首次输入自动生成，截断显示）
+  - 优先级 2：token 用量（`In:{input} Out:{output} Cache R:{cache_read}`）
+  - 优先级 3：API 平均延迟（`avg:{ms}ms`，取最近 5 次请求平均值）
+  - 优先级 4：session 活动状态指示灯（`●`(green)=active，`●`(blue)=completed，`●`(red)=error）
+  - 终端宽度不足时，从低优先级开始隐藏，保证高优先级信息始终可见
 
 - [ ] `tui/src/ui/chat.rs` — 聊天消息渲染：
 
@@ -684,36 +710,40 @@ pub fn render(frame: &mut Frame, app: &App);
   - 各 cell 类型样式：
     - `[You]` 前缀（cyan bold）+ 用户消息
     - `[Assistant]` 前缀（green bold）+ assistant 回复
-    - 工具调用：`── tool_name ──` 标题 + 输出内容 + 状态标记
+    - 工具调用：内联可折叠块（`▶`/`▼` + 工具名 + 参数摘要 + 状态/输出），见 `tools.rs`
     - 系统消息：灰色斜体
     - 错误消息：红色
 
 - [ ] `tui/src/ui/input.rs` — 输入框渲染：
 
 ```
-│ > 请输入你的任务... (Enter 发送, Ctrl+C 退出, Tab 切换焦点)       │
+│ gemma4:e4b │ [Code] │ > 请输入你的任务...                        │
+│ Enter 发送 · Ctrl+C 退出 · Tab 切换模式                         │
 ```
 
+  - 输入框上方或左侧显示：模型名 + 当前 Agent 模式标签（`[Plan]`/`[Code]`/`[Ask]`）
   - 显示用户输入文本 + 光标位置
   - 输入为空时显示占位提示文本（灰色）
   - 多行支持：输入超过一行时自动换行
   - 底部快捷键提示行
 
-- [ ] `tui/src/ui/tools.rs` — 工具面板渲染：
+- [ ] `tui/src/ui/tools.rs` — 工具调用可折叠块渲染（内联在聊天流中）：
 
 ```
-│  Tool Calls             │
-│  ✓ read_file            │
-│    "core/src/main.rs"   │
-│    → 14 lines           │
-│  ✗ write_to_file        │
-│    (running...)         │
+│   ▶ read_file "core/src/main.rs" → 14 lines           [✓ 0.1s]│  ← 折叠状态
+│   ▼ read_file "core/src/lib.rs"                        [✓ 0.08s]│  ← 展开状态
+│     1 | pub mod agent;                                           │
+│     2 | pub mod api;                                             │
+│     ...                                                          │
+│   ⟳ write_to_file "core/src/main.rs"                   [running]│  ← 执行中
 ```
 
-  - 每个工具调用一行：状态图标（✓/✗/⟳）+ 工具名
-  - 展开时显示：参数摘要 + 输出预览
-  - 正在执行的工具高亮显示
-  - 可折叠（`ToolPanel.visible` 控制）
+  - 折叠状态：`▶` + 工具名 + 参数摘要 + 执行结果摘要 + 耗时
+  - 展开状态：`▼` + 完整输出内容（带行号）
+  - 执行中状态：`⟳` + 工具名 + 参数，高亮显示
+  - 失败状态：`✗` + 工具名 + 错误信息（红色）
+  - `Enter` 或 `Space` 在聊天面板焦点时展开/折叠当前选中的工具块
+  - 默认折叠，用户可逐个展开查看详情
 
 - [ ] `tui/src/ui/streaming.rs` — 流式文本渲染（两区模型）：
 
@@ -735,15 +765,17 @@ pub fn render(frame: &mut Frame, app: &App);
 ```rust
 pub struct App {
     pub chat_widget: ChatWidget,
-    pub tool_panel: ToolPanel,
-    pub status: ConnectionStatus,
+    pub status: SessionStatus,
     pub session_id: Option<String>,
+    pub session_name: Option<String>,       // 模型根据首次输入自动生成
+    pub agent_mode: AgentMode,              // Plan / Code / Ask
     pub should_quit: bool,
     pub needs_redraw: bool,
     pub app_event_tx: AppEventSender,
     pub focus: FocusTarget,
     pub input_tokens: i32,
     pub output_tokens: i32,
+    pub cache_read_tokens: i32,
     pub model: String,
 }
 
@@ -752,11 +784,16 @@ pub enum FocusTarget {
     Input,
 }
 
-pub enum ConnectionStatus {
-    Connecting,
-    Connected,
-    Disconnected,
-    Reconnecting(u32),
+pub enum AgentMode {
+    Plan,   // 只读分析：Core 修改 system prompt 强制只读行为，不过滤工具（LLM 自觉遵守）
+    Code,   // 正常执行所有工具
+    Ask,    // 只回答问题：Core 修改 system prompt 禁止工具调用，不过滤工具（LLM 自觉遵守）
+}
+
+pub enum SessionStatus {
+    Active,    // ●(green) - 正在执行任务
+    Completed, // ●(blue) - 任务已完成
+    Error,     // ●(red) - 出现错误
 }
 ```
 
@@ -774,10 +811,10 @@ pub enum ConnectionStatus {
   - `handle_app_event(event: AppEvent)`：处理内部事件，更新子组件状态
     - `UserMessageSent(text)` → `chat_widget.push_cell(UserMessageCell)` + 通过 IPC 发送 `user_message`
     - `AssistantDelta { delta }` → `chat_widget.append_streaming(delta)` + `needs_redraw = true`
-    - `ToolCallStart { .. }` → `tool_panel.calls.push(ToolCallDisplay { status: Running })`
-    - `ToolResult { .. }` → 更新对应 ToolCallDisplay 的 status/output
+    - `ToolCallStart { .. }` → `chat_widget.finish_streaming()`（结束当前 assistant 文本段）+ `chat_widget.push_cell(ToolCallCell { status: Running })`（中断插入 ToolCallCell）
+    - `ToolResult { .. }` → 更新对应 ToolCallCell 的 status/output
     - `TaskDone { .. }` → `chat_widget.finish_streaming()` + 重置流式状态
-    - `Usage { .. }` → 累加 `input_tokens` / `output_tokens`
+    - `Usage { .. }` → 累加 `input_tokens` / `output_tokens` / `cache_read_tokens`
     - `Error { .. }` → `chat_widget.push_cell(ErrorCell)`
     - `Quit` → `should_quit = true`
   - `request_redraw()`：设置 `needs_redraw = true`
@@ -796,18 +833,21 @@ async fn main() -> anyhow::Result<()> {
     // 1. 解析 CLI 参数：--socket-path（覆盖默认 socket 路径）
     let socket_name = resolve_socket_name();
 
-    // 2. 初始化终端（raw mode, bracketed paste, alternate screen）
-    let mut tui = Tui::init()?;
-    tui.enter_alt_screen();
-
-    // 3. 连接 core daemon
+    // 2. 连接 core daemon（在进入 raw mode 之前，连接失败可直接打印错误退出）
     let ipc = IpcClient::connect(&socket_name).await?;
 
-    // 4. 创建 session
+    // 3. 创建 session（传入 cwd 和可选的 API 配置）
     let session = ipc.send_request("create_session", json!({
-        "cwd": std::env::current_dir()?.to_string_lossy()
+        "cwd": std::env::current_dir()?.to_string_lossy(),
+        "model": null,           // 可选，null 使用全局默认
+        "base_url": null,        // 可选
+        "api_key": null,         // 可选
     })).await?;
     let session_id = session["session_id"].as_str().unwrap().to_string();
+
+    // 4. 初始化终端（raw mode, bracketed paste, alternate screen）
+    let mut tui = Tui::init()?;
+    tui.enter_alt_screen();
 
     // 5. 构建 App 状态
     let (app_event_tx, mut app_event_rx) = mpsc::unbounded_channel::<AppEvent>();
@@ -825,8 +865,8 @@ async fn main() -> anyhow::Result<()> {
 ```
 
 - [ ] CLI 参数解析：`--socket-path` 覆盖默认 socket 路径（复用 core 的 `resolve_socket_path`）
-- [ ] 初始化顺序：Tui::init → IPC connect → create_session → App::new → 进入事件循环
-- [ ] 初始化失败处理：连接超时/拒绝时显示错误信息并退出（不进入 raw mode）
+- [ ] 初始化顺序：IPC connect → create_session → Tui::init → App::new → 进入事件循环（IPC 连接失败时可直接打印错误退出，不进入 raw mode）
+- [ ] 初始化失败处理：IPC 连接超时/拒绝时打印错误信息并退出；TUI 初始化失败时清理 IPC 连接
 - [ ] 验证：`cargo build -p crown-tui` 编译通过
 
 #### 1.7.2 事件路由与分发：三路事件源接入
@@ -867,8 +907,8 @@ loop {
 
 - [ ] 终端事件 → `app.handle_key()` / `app.handle_paste()` / `app.request_redraw()`
 - [ ] IPC 消息 → `app.handle_ipc_message()`：解析 JSON-RPC → 转换为 AppEvent → 发送到 app_event_tx
-- [ ] 内部事件 → `app.handle_app_event()`：更新 ChatWidget / ToolPanel / 状态
-- [ ] IPC 断连处理：`ipc.read_message()` 返回 `None` 时设置 `ConnectionStatus::Disconnected`，提示用户重连或退出
+- [ ] 内部事件 → `app.handle_app_event()`：更新 ChatWidget / SessionStatus / token 统计
+- [ ] IPC 断连处理：`ipc.read_message()` 返回 `None` 时设置 `SessionStatus::Error`，提示用户重连或退出
 - [ ] 验证：启动 core daemon + TUI → 输入消息 → 看到事件在三路之间正确流转
 
 #### 1.7.3 帧率控制与渲染：needs_redraw + interval 调度
@@ -899,8 +939,8 @@ _ = draw_interval.tick() => {
 - [ ] **正常退出**：Ctrl+C / Ctrl+D → `AppEvent::Quit` → `should_quit = true` → 退出循环 → `leave_alt_screen` + `restore` + 发送 `destroy_session`
 - [ ] **panic 恢复**：设置 `std::panic::set_hook`，panic 时执行 `Tui::restore()` 恢复终端（避免终端卡在 raw mode）
 - [ ] **IPC 断连恢复**：
-  - 检测到断连 → 设置 `ConnectionStatus::Disconnected` → UI 显示断连提示
-  - 用户按 `R` 键 → 尝试重连（3 次，间隔 1s/2s/4s）→ 成功则恢复 `Connected`
+  - 检测到断连 → 设置 `SessionStatus::Error` → UI 显示错误提示
+  - 用户按 `R` 键 → 尝试重连（3 次，间隔 1s/2s/4s）→ 成功则恢复 `SessionStatus::Active`
   - 重连失败 → 提示用户重启 core daemon，可选择退出
 - [ ] **信号处理**：SIGTERM / SIGINT（Windows: Ctrl+C）触发优雅退出流程
 - [ ] **Session 恢复**：TUI 重新连接后可选择新建 session 或恢复已有 session（通过 `list_sessions` 查询）
@@ -913,7 +953,7 @@ _ = draw_interval.tick() => {
 
 - [ ] **启动流程**：终端 A 运行 `crown-core`（daemon 启动，监听 socket）→ 终端 B 运行 `crown-tui`（连接成功，创建 session）
 - [ ] **基本对话**：TUI 输入 "hello" → 看到 assistant 流式回复
-- [ ] **工具调用**：TUI 输入 "读取 core/src/main.rs" → 看到 tool_call 面板 + 文件内容 + assistant 总结
+- [ ] **工具调用**：TUI 输入 "读取 core/src/main.rs" → 看到 tool_call 可折叠块 + 文件内容 + assistant 总结
 - [ ] **Multi-session**：终端 B 和终端 C 同时运行 `crown-tui`，连接同一个 core daemon，session 完全隔离
 - [ ] **取消任务**：TUI 按 Ctrl+X 取消正在执行的任务
 - [ ] **断线恢复**：TUI 异常退出 → 重新连接 → session 可恢复或新建
@@ -1049,7 +1089,32 @@ tui/src/
 │   ├── mod.rs                  #           UI 渲染入口
 │   ├── chat.rs                 #           聊天消息渲染
 │   ├── input.rs                #           输入框渲染
-│   ├── tools.rs                #           工具面板渲染
+│   ├── tools.rs                #           工具调用可折叠块渲染（内联在聊天流中）
 │   ├── status.rs               #           状态栏渲染
 │   └── streaming.rs            #           流式文本渲染（两区模型）
 ```
+
+---
+
+## 功能建议（待排期）
+
+### P1 — TUI 体验核心
+
+- [ ] **`/` 斜杠命令**：`/clear` 清空历史、`/compact` 压缩上下文（调用 LLM 总结历史后截断）、`/model` 切换模型。输入框输入 `/` 时弹出自动补全列表。codex 有完整实现可参考。
+- [ ] **输入历史导航**：Up/Down 箭头浏览历史输入（类似 shell history），存储在内存中，session 结束丢弃。
+- [ ] **执行审批流**：`execute_command` 执行前显示命令内容，用户可 Approve/Reject。参考 codex 的 approval overlay（全屏覆盖层，显示命令 + 预估风险，Enter 执行 / Esc 拒绝）。默认自动执行，后续可通过配置启用审批流。
+- [ ] **多行输入**：Shift+Enter 换行（tui-textarea 已支持），粘贴多行内容不自动发送（bracketed paste 检测）。
+
+### P2 — 功能增强
+
+- [ ] **上下文窗口用量**：状态栏或输入框附近显示 context window 占用百分比（`ctx: 45%`），接近 80% 时黄色警告，超过 90% 时红色警告。
+- [ ] **Session 持久化**：Session history 保存到磁盘（`~/.crown-code/sessions/`），daemon 重启后可通过 `list_sessions` 恢复。
+- [ ] **Diff 预览**：`write_to_file` / `replace_in_file` 执行前在聊天流中显示 unified diff 预览（复用 `xdiff` 模块），用户可 Approve/Reject。
+- [ ] **Agent 模式感知提示**：Plan/Ask 模式下，输入框附近显示当前模式的约束说明（如 Plan: "只读分析模式，不会修改文件"）。
+
+### P3 — 未来探索
+
+- [ ] **复制模式**：类 vim visual mode（按 `v` 进入），方向键选择聊天内容，`y` 复制到系统剪贴板。
+- [ ] **文件路径自动补全**：输入框中输入 `@` 或 `/` 时弹出文件路径补全（扫描 workspace 文件树）。
+- [ ] **主题配置**：用户可自定义颜色方案（`~/.crown-code/theme.toml`），支持 dark/light 切换。
+- [ ] **快捷键自定义**：用户可覆盖默认键绑定（`~/.crown-code/keymap.toml`）。

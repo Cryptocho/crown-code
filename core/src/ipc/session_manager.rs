@@ -80,13 +80,14 @@ impl AgentEventHandler for IpcEventHandler {
         ));
     }
 
-    fn on_usage(&mut self, input_tokens: i32, output_tokens: i32) {
+    fn on_usage(&mut self, input_tokens: i32, output_tokens: i32, cache_read_tokens: i32) {
         let _ = self.event_tx.try_send(make_notification(
             METHOD_USAGE,
             serde_json::json!({
                 "session_id": self.session_id,
                 "input_tokens": input_tokens,
                 "output_tokens": output_tokens,
+                "cache_read_tokens": cache_read_tokens,
             }),
         ));
     }
@@ -376,13 +377,14 @@ mod tests {
     async fn test_ipc_event_handler_on_usage() {
         let (tx, mut rx) = mpsc::channel(256);
         let mut handler = IpcEventHandler::new("sess_test".to_string(), tx);
-        handler.on_usage(100, 50);
+        handler.on_usage(100, 50, 30);
         let msg = rx.recv().await.unwrap();
         assert_eq!(msg.method.as_deref(), Some(METHOD_USAGE));
         let params = msg.params.unwrap();
         assert_eq!(params["session_id"], "sess_test");
         assert_eq!(params["input_tokens"], 100);
         assert_eq!(params["output_tokens"], 50);
+        assert_eq!(params["cache_read_tokens"], 30);
     }
 
     #[tokio::test]

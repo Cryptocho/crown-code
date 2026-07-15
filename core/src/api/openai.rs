@@ -214,9 +214,14 @@ pub fn parse_stream_event(data: &str) -> Vec<ApiStreamChunk> {
             .get("completion_tokens")
             .and_then(|v| v.as_i64())
             .unwrap_or(0) as i32;
+        let cache_read = u
+            .get("cache_read_tokens")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0) as i32;
         return vec![ApiStreamChunk::Usage {
             input_tokens: input,
             output_tokens: output,
+            cache_read_tokens: cache_read,
         }];
     }
 
@@ -309,12 +314,16 @@ pub async fn create_message_stream(
                     ApiStreamChunk::Usage {
                         input_tokens,
                         output_tokens,
+                        cache_read_tokens,
                     } => {
                         if input_tokens > 0 {
                             usage.input_tokens = input_tokens;
                         }
                         if output_tokens > 0 {
                             usage.output_tokens = output_tokens;
+                        }
+                        if cache_read_tokens > 0 {
+                            usage.cache_read_tokens = cache_read_tokens;
                         }
                     }
                     ApiStreamChunk::ToolCall(ref tc) => {
@@ -788,7 +797,8 @@ mod tests {
             &chunks[0],
             ApiStreamChunk::Usage {
                 input_tokens: 10,
-                output_tokens: 5
+                output_tokens: 5,
+                cache_read_tokens: 0
             }
         ));
     }
@@ -802,7 +812,8 @@ mod tests {
             &chunks[0],
             ApiStreamChunk::Usage {
                 input_tokens: 10,
-                output_tokens: 0
+                output_tokens: 0,
+                cache_read_tokens: 0
             }
         ));
     }

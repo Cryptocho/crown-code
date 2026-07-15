@@ -12,6 +12,13 @@ pub trait HistoryCell: Debug + Send + Sync {
         false
     }
     fn append_delta(&mut self, _delta: &str) {}
+    fn finish_streaming(&mut self) {}
+    fn as_tool_call(&self) -> Option<&ToolCallCell> {
+        None
+    }
+    fn as_tool_call_mut(&mut self) -> Option<&mut ToolCallCell> {
+        None
+    }
 }
 
 #[derive(Debug)]
@@ -27,8 +34,8 @@ impl HistoryCell for UserMessageCell {
     }
 
     fn desired_height(&self, width: u16) -> u16 {
-        let total_len = 6 + self.content.len();
-        (total_len as u16).div_ceil(width).max(1)
+        let total_len = 6 + self.content.chars().count();
+        (total_len as u16).div_ceil(width.max(1)).max(1)
     }
 }
 
@@ -63,7 +70,7 @@ impl HistoryCell for AssistantMessageCell {
 
     fn desired_height(&self, width: u16) -> u16 {
         let total_len = 11 + self.content.len() + if self.is_streaming { 1 } else { 0 };
-        (total_len as u16).div_ceil(width).max(1)
+        (total_len as u16).div_ceil(width.max(1)).max(1)
     }
 
     fn is_stream_continuation(&self) -> bool {
@@ -72,6 +79,10 @@ impl HistoryCell for AssistantMessageCell {
 
     fn append_delta(&mut self, delta: &str) {
         self.content.push_str(delta);
+    }
+
+    fn finish_streaming(&mut self) {
+        self.is_streaming = false;
     }
 }
 
@@ -87,37 +98,50 @@ pub struct ToolCallCell {
     pub call_id: String,
     pub name: String,
     pub arguments: String,
+    pub arguments_summary: String,
     pub status: ToolCallStatus,
     pub output: Option<String>,
+    pub expanded: bool,
+    pub elapsed_ms: Option<u64>,
 }
 
 impl HistoryCell for ToolCallCell {
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
-        let status_icon = match self.status {
-            ToolCallStatus::Running => "\u{27F3}",
-            ToolCallStatus::Success => "\u{2713}",
-            ToolCallStatus::Error => "\u{2717}",
+        let w = width as usize;
+        let fold = if self.expanded { "\u{25BC}" } else { "\u{25B6}" };
+        let (status_icon, status_color) = match self.status {
+            ToolCallStatus::Running => ("\u{27F3}", Color::Yellow),
+            ToolCallStatus::Success => ("\u{2713}", Color::Green),
+            ToolCallStatus::Error => ("\u{2717}", Color::Red),
         };
-        let title = format!("  {status_icon} {} ", self.name);
-        let mut lines = vec![make_line(&title, width, Color::Yellow)];
+        let elapsed_str = match (&self.status, self.elapsed_ms) {
+            (ToolCallStatus::Success | ToolCallStatus::Error, Some(ms)) => format!("{ms}ms"),
+            _ => "running".to_string(),
+        };
 
-        let args_display = if self.arguments.chars().count() > 60 {
-            let truncated: String = self.arguments.chars().take(57).collect();
-            format!("    {truncated}...")
+        let header = format!("{fold} {} \"{}\"", self.name, self.arguments_summary);
+        let tag = format!("[{status_icon} {elapsed_str}]");
+
+        let mut title = header.clone();
+        let title_display_len = header.chars().count() + tag.chars().count() + 1;
+        if title_display_len < w {
+            let padding = w - title_display_len;
+            title.push_str(&" ".repeat(padding));
         } else {
-            format!("    {}", self.arguments)
-        };
-        lines.push(make_line(&args_display, width, Color::DarkGray));
+            title.push(' ');
+        }
+        title.push_str(&tag);
 
-        if let Some(ref output) = self.output {
-            let preview = if output.chars().count() > 200 {
-                let truncated: String = output.chars().take(197).collect();
-                format!("{truncated}...")
-            } else {
-                output.clone()
-            };
-            for line_text in preview.lines() {
-                lines.push(make_line(line_text, width, Color::Gray));
+        let mut lines = vec![Line::from(vec![
+            Span::styled(format!("  {title}"), Style::default().fg(status_color)),
+        ])];
+
+        if self.expanded
+            && let Some(ref output) = self.output
+        {
+            for (i, line) in output.lines().enumerate() {
+                let numbered = format!("    {} | {}", i + 1, line);
+                lines.push(make_line(&numbered, width, Color::Gray));
             }
         }
 
@@ -125,12 +149,24 @@ impl HistoryCell for ToolCallCell {
     }
 
     fn desired_height(&self, _width: u16) -> u16 {
-        let output_lines = self
-            .output
-            .as_ref()
-            .map(|o| o.lines().count() as u16)
-            .unwrap_or(0);
-        (2 + output_lines).max(1)
+        if self.expanded {
+            let output_lines = self
+                .output
+                .as_ref()
+                .map(|o| o.lines().count() as u16)
+                .unwrap_or(0);
+            1 + output_lines
+        } else {
+            1
+        }
+    }
+
+    fn as_tool_call(&self) -> Option<&ToolCallCell> {
+        Some(self)
+    }
+
+    fn as_tool_call_mut(&mut self) -> Option<&mut ToolCallCell> {
+        Some(self)
     }
 }
 
@@ -145,7 +181,7 @@ impl HistoryCell for SystemMessageCell {
     }
 
     fn desired_height(&self, width: u16) -> u16 {
-        (self.content.len() as u16).div_ceil(width).max(1)
+        (self.content.len() as u16).div_ceil(width.max(1)).max(1)
     }
 }
 
@@ -163,7 +199,7 @@ impl HistoryCell for ErrorCell {
 
     fn desired_height(&self, width: u16) -> u16 {
         let text_len = 10 + self.message.len();
-        (text_len as u16).div_ceil(width).max(1)
+        (text_len as u16).div_ceil(width.max(1)).max(1)
     }
 }
 
@@ -260,11 +296,117 @@ mod tests {
             call_id: "c1".to_string(),
             name: "read_file".to_string(),
             arguments: "{}".to_string(),
+            arguments_summary: "{}".to_string(),
             status: ToolCallStatus::Running,
             output: None,
+            expanded: false,
+            elapsed_ms: None,
         };
         let lines = cell.display_lines(80);
-        assert!(lines.len() >= 2);
+        assert_eq!(lines.len(), 1);
+    }
+
+    #[test]
+    fn test_tool_call_collapsed_hides_output() {
+        let cell = ToolCallCell {
+            call_id: "c1".to_string(),
+            name: "read_file".to_string(),
+            arguments: "{}".to_string(),
+            arguments_summary: "{}".to_string(),
+            status: ToolCallStatus::Success,
+            output: Some("line1\nline2\nline3".to_string()),
+            expanded: false,
+            elapsed_ms: Some(100),
+        };
+        let lines = cell.display_lines(80);
+        assert_eq!(lines.len(), 1);
+    }
+
+    #[test]
+    fn test_tool_call_expanded_shows_output_with_line_numbers() {
+        let cell = ToolCallCell {
+            call_id: "c1".to_string(),
+            name: "read_file".to_string(),
+            arguments: "{}".to_string(),
+            arguments_summary: "{}".to_string(),
+            status: ToolCallStatus::Success,
+            output: Some("line1\nline2\nline3".to_string()),
+            expanded: true,
+            elapsed_ms: Some(100),
+        };
+        let lines = cell.display_lines(80);
+        assert_eq!(lines.len(), 4);
+        let line_text = format!("{:?}", lines[1]);
+        assert!(line_text.contains("1 |"));
+        let line_text2 = format!("{:?}", lines[2]);
+        assert!(line_text2.contains("2 |"));
+    }
+
+    #[test]
+    fn test_tool_call_elapsed_display() {
+        let cell = ToolCallCell {
+            call_id: "c1".to_string(),
+            name: "read_file".to_string(),
+            arguments: "{}".to_string(),
+            arguments_summary: "{}".to_string(),
+            status: ToolCallStatus::Success,
+            output: None,
+            expanded: false,
+            elapsed_ms: Some(100),
+        };
+        let lines = cell.display_lines(80);
+        let line_text = format!("{:?}", lines[0]);
+        assert!(line_text.contains("100ms"));
+    }
+
+    #[test]
+    fn test_tool_call_running_no_elapsed() {
+        let cell = ToolCallCell {
+            call_id: "c1".to_string(),
+            name: "read_file".to_string(),
+            arguments: "{}".to_string(),
+            arguments_summary: "{}".to_string(),
+            status: ToolCallStatus::Running,
+            output: None,
+            expanded: false,
+            elapsed_ms: None,
+        };
+        let lines = cell.display_lines(80);
+        let line_text = format!("{:?}", lines[0]);
+        assert!(line_text.contains("running"));
+    }
+
+    #[test]
+    fn test_finish_streaming_trait() {
+        let mut cell = AssistantMessageCell::new_streaming();
+        assert!(cell.is_stream_continuation());
+        HistoryCell::finish_streaming(&mut cell);
+        assert!(!cell.is_stream_continuation());
+    }
+
+    #[test]
+    fn test_tool_call_as_tool_call() {
+        let mut cell = ToolCallCell {
+            call_id: "c1".to_string(),
+            name: "read_file".to_string(),
+            arguments: "{}".to_string(),
+            arguments_summary: "{}".to_string(),
+            status: ToolCallStatus::Running,
+            output: None,
+            expanded: false,
+            elapsed_ms: None,
+        };
+        assert!(cell.as_tool_call().is_some());
+        assert!(cell.as_tool_call_mut().is_some());
+    }
+
+    #[test]
+    fn test_user_cell_as_tool_call_none() {
+        let mut cell = UserMessageCell {
+            content: "hi".to_string(),
+        };
+        assert!(cell.as_tool_call().is_none());
+        assert!(cell.as_tool_call_mut().is_none());
     }
 
     #[test]
