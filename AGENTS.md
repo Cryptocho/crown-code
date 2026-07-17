@@ -59,10 +59,26 @@ Compared to cline, this project aims to deliver:
 │       ├── search_json.rs       # JSON search output formatter
 │       ├── shell_detect.rs      # Shell detection
 │       └── xdiff.rs             # Unified diff engine
-├── tui/                         # TUI frontend (crown-tui, placeholder)
+├── tui/                         # TUI frontend (crown-tui)
 │   ├── Cargo.toml
 │   └── src/
-│       └── main.rs              # Placeholder (println!("crown-tui: ready"))
+│       ├── main.rs              # Entry point: event loop + key dispatch
+│       ├── app.rs               # App state struct + enums (SessionStatus/AgentMode/FocusTarget)
+│       ├── app_event.rs         # AppEvent enum (internal message bus)
+│       ├── event.rs             # TuiEvent enum (Key/Paste/Resize)
+│       ├── tui.rs               # Tui terminal abstraction (init/restore/draw)
+│       ├── ipc.rs               # IPC client (connect to core daemon)
+│       ├── chatwidget.rs        # ChatWidget state (cells/active_cell/textarea/scroll)
+│       ├── history_cell.rs      # HistoryCell trait + 5 cell types
+│       ├── renderable.rs        # Renderable trait + FlexRenderable layout
+│       ├── keymap.rs            # Key bindings (input/chat keymaps)
+│       └── ui/
+│           ├── mod.rs           # render() entry — Layout 3-zone composition
+│           ├── status.rs        # Status bar (priority-based right-to-left assembly)
+│           ├── chat.rs          # Chat panel (buf.set_line + scroll)
+│           ├── input.rs         # Input bar (prefix + textarea + reversed cursor)
+│           ├── tools.rs         # Tool call rendering helper
+│           └── streaming.rs     # StreamingRenderer (P2 two-region model interface)
 ├── cline/                       # Upstream Cline extension reference (archived)
 │   ├── package.json
 │   ├── src/

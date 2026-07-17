@@ -679,82 +679,25 @@ pub fn handle_key(key: KeyEvent, app: &mut App) -> bool;  // 返回 true 表示�
 
 > 目标：所有 UI 面板可通过 `render(area, frame)` 渲染到 ratatui Buffer
 
-- [ ] `tui/src/ui/mod.rs` — UI 渲染入口：
+- [x] `tui/Cargo.toml` 新增 `unicode-width = "0.1"` 依赖
 
-```rust
-pub fn render(frame: &mut Frame, app: &App);
-```
+- [x] `tui/src/app.rs` — App 状态结构体 + 枚举定义（`SessionStatus`/`AgentMode`/`FocusTarget`/`App`）+ `new()` 构造器 + `avg_latency()` 方法
 
-  - 使用 FlexRenderable（或 ratatui Layout）组合三区域：
-    - 顶部：状态栏（固定 1 行，按优先级自适应裁剪信息）
-    - 中部：聊天面板（flex:1），所有消息线性排列，工具调用内联为可折叠块
-    - 底部：输入栏（固定 2-3 行，含模型名 + Agent 模式标签 + 输入框 + 快捷键提示）
+- [x] `tui/src/ui/mod.rs` — UI 渲染入口，使用 ratatui `Layout` 组合三区域（状态栏1行 + 聊天面板Min(1) + 输入栏2行）
 
-- [ ] `tui/src/ui/status.rs` — 状态栏渲染：
+- [x] `tui/src/ui/status.rs` — 状态栏渲染（优先级从低到高：P4 status icon / P3 latency / P2 token / P1 name，从右到左组装，宽度不足时自动裁剪）
 
-```
-│ 我的第一个项目 │ In:1234 Out:567 Cache R:890 │ avg:230ms │ ●              │
-```
+- [x] `tui/src/ui/chat.rs` — 聊天面板渲染（`buf.set_line` 逐行渲染，scroll_offset 支持滚动）
 
-  - 顶部固定 1 行，信息按优先级排列，根据终端宽度自适应裁剪
-  - 优先级 1：session 名称（模型根据首次输入自动生成，截断显示）
-  - 优先级 2：token 用量（`In:{input} Out:{output} Cache R:{cache_read}`）
-  - 优先级 3：API 平均延迟（`avg:{ms}ms`，取最近 5 次请求平均值）
-  - 优先级 4：session 活动状态指示灯（`●`(green)=active，`●`(blue)=completed，`●`(red)=error）
-  - 终端宽度不足时，从低优先级开始隐藏，保证高优先级信息始终可见
+- [x] `tui/src/ui/input.rs` — 输入栏渲染（前缀 + textarea 内容 + REVERSED 光标 + 快捷键提示，CJK 字符宽度正确处理）
 
-- [ ] `tui/src/ui/chat.rs` — 聊天消息渲染：
+- [x] `tui/src/ui/tools.rs` — 工具调用渲染辅助（委托 `ToolCallCell::display_lines`/`desired_height`）
 
-  - 遍历 `ChatWidget.cells` + `active_cell`，对每个 cell 调用 `display_lines(width)`
-  - 根据 `scroll_offset` 裁剪可见区域
-  - 各 cell 类型样式：
-    - `[You]` 前缀（cyan bold）+ 用户消息
-    - `[Assistant]` 前缀（green bold）+ assistant 回复
-    - 工具调用：内联可折叠块（`▶`/`▼` + 工具名 + 参数摘要 + 状态/输出），见 `tools.rs`
-    - 系统消息：灰色斜体
-    - 错误消息：红色
+- [x] `tui/src/ui/streaming.rs` — 流式文本渲染器（plain-text 换行，宽度变化时重新渲染，为 P2 两区模型预留接口）
 
-- [ ] `tui/src/ui/input.rs` — 输入框渲染：
+- [x] `tui/src/main.rs` — 注册 `mod app; mod ui;`，完整事件循环（快捷键先于 textarea 检查，draw 错误优雅处理，mock 数据验证）
 
-```
-│ gemma4:e4b │ [Code] │ > 请输入你的任务...                        │
-│ Enter 发送 · Ctrl+C 退出 · Tab 切换模式                         │
-```
-
-  - 输入框上方或左侧显示：模型名 + 当前 Agent 模式标签（`[Plan]`/`[Code]`/`[Ask]`）
-  - 显示用户输入文本 + 光标位置
-  - 输入为空时显示占位提示文本（灰色）
-  - 多行支持：输入超过一行时自动换行
-  - 底部快捷键提示行
-
-- [ ] `tui/src/ui/tools.rs` — 工具调用可折叠块渲染（内联在聊天流中）：
-
-```
-│   ▶ read_file "core/src/main.rs" → 14 lines           [✓ 0.1s]│  ← 折叠状态
-│   ▼ read_file "core/src/lib.rs"                        [✓ 0.08s]│  ← 展开状态
-│     1 | pub mod agent;                                           │
-│     2 | pub mod api;                                             │
-│     ...                                                          │
-│   ⟳ write_to_file "core/src/main.rs"                   [running]│  ← 执行中
-```
-
-  - 折叠状态：`▶` + 工具名 + 参数摘要 + 执行结果摘要 + 耗时
-  - 展开状态：`▼` + 完整输出内容（带行号）
-  - 执行中状态：`⟳` + 工具名 + 参数，高亮显示
-  - 失败状态：`✗` + 工具名 + 错误信息（红色）
-  - `Enter` 或 `Space` 在聊天面板焦点时展开/折叠当前选中的工具块
-  - 默认折叠，用户可逐个展开查看详情
-
-- [ ] `tui/src/ui/streaming.rs` — 流式文本渲染（两区模型）：
-
-  - `StreamingRenderer`：管理 raw_source → rendered_lines → stable/tail 分区
-  - `append_delta(delta: &str)`：累积 raw_source，触发重新渲染
-  - `render(area, frame, scroll_offset)`：渲染当前帧
-  - stable region：已确认的行，逐帧 drain 产生打字效果
-  - tail region：活动流式文本，持续更新
-  - 宽度变化时自动重新渲染（Resize 事件触发）
-
-- [ ] 验证：各 UI 模块编译通过，可在 test 中构造 mock 数据调用 `render()` 检查输出 buffer
+- [x] 验证：25 个新增单元测试通过（status 6 / chat 5 / input 4 / tools 3 / streaming 5 / mod 2），总计89 个测试通过
 
 #### 1.6.6 App 状态机：整合所有组件 + 事件分发
 

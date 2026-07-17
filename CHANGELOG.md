@@ -1,5 +1,33 @@
 # Changelog
 
+## UI 渲染层：各面板 ratatui Widget 实现
+
+### Added
+- `tui/Cargo.toml`：新增 `unicode-width = "0.1"` 依赖（CJK 字符宽度计算）
+- `tui/src/app.rs`：App 状态结构体模块。包含 `SessionStatus`（Active/Completed/Error）、`AgentMode`（Plan/Code/Ask，含 `label()`/`cycle()` 方法）、`FocusTarget`（ChatPanel/Input）、`App` 结构体（chat_widget/status/session_id/session_name/agent_mode/should_quit/needs_redraw/app_event_tx/focus/input_tokens/output_tokens/cache_read_tokens/model/api_latencies）。公共 API：`App::new()`（构造器）、`avg_latency()`（VecDeque< u64 > 容量5，计算平均延迟）。5 个单元测试
+- `tui/src/ui/mod.rs`：UI 渲染入口模块。`pub fn render(frame, app)` 使用 ratatui `Layout` 组合三区域（Status(Length 1) / Chat(Min 1) / Input(Length 2)）。`status_bar_data_from_app` 桥接 App 数据到 StatusBarData。2 个测试（full render + minimum terminal size）
+- `tui/src/ui/status.rs`：状态栏渲染模块。`StatusBarData` 结构体 + `render_status_bar()` 优先级排序。从右到左组装：P4 icon(●) / P3 latency(avg:Nms) / P2 token(In:X Out:Y Cache R:Z)，宽度不足时从低优先级开始隐藏。name 使用 `UnicodeWidthStr` 按字符边界截断。6 个测试（full width / narrow drop / very narrow truncate / status colors / zero height / default name）
+- `tui/src/ui/chat.rs`：聊天面板渲染模块。`render_chat_panel()` 使用 `buf.set_line` 逐行渲染 `display_lines()` 输出，支持 scroll_offset 滚动和 clear_line 行清除。5 个测试（empty chat / single message / scroll offset / streaming cell / tool call）
+- `tui/src/ui/input.rs`：输入栏渲染模块。`InputBarData` + `render_input_bar()` 处理 height=0/1/2+ 三种情况。行0：前缀(model + mode + ">") + textarea 内容 + REVERSED 光标（CJK 宽度正确偏移）。行1：快捷键提示。4 个测试（normal rendering / empty input / empty model / minimum height）
+- `tui/src/ui/tools.rs`：工具调用渲染辅助模块。`tool_call_lines()`/`tool_call_height()` 委托 `ToolCallCell::display_lines()`/`desired_height()`。3 个测试（collapsed single line / expanded multiple lines / running height）
+- `tui/src/ui/streaming.rs`：流式文本渲染器模块。`StreamingRenderer` 持有 raw_source + last_width + rendered_lines，`append_delta` 标记 dirty，`rendered_lines(width)` 宽度变化时 re-render，`render()` 使用 `Paragraph::wrap` 渲染到 Buffer。`reset()` 清空状态。为 P2 两区模型（markdown 重渲染 + commit 动画）预留接口。5 个测试（empty renderer / delta accumulates / rerender on width change / render to buffer / reset clears）
+- `tui/src/main.rs`：注册 `mod app; mod ui;`。完整事件循环：快捷键先于 textarea 检查（防止 Tab 被 textarea 吞掉）、mock 数据注入（session_name + token stats + latency + 5 条模拟消息）。ChatPanel 焦点支持 scroll/toggle tool expand
+
+### Refactored
+- `tui/src/main.rs`：事件循环重构为 keymap-first 模式（先查快捷键，未匹配才传 textarea），支持 SubmitMessage/CycleAgentMode/Scroll/ToggleToolExpand 等完整 keymap actions
+
+### Bug Fixes
+- `tui/src/ui/input.rs`：光标位置修复 — `textarea.cursor().1` 返回字符索引，CJK 字符占 2 列显示宽度，修复为累加 `UnicodeWidthStr::width(text_before)` 计算实际偏移
+- `tui/src/ui/input.rs`：快捷键拦截修复 — 原逻辑先传 textarea 再查 keymap，Tab/Enter 被 textarea 吃掉无法切换焦点或提交消息，修复为 keymap-first 模式
+
+### Architecture
+- UI 渲染架构：`ui::render()` → Layout 三分区 → status/chat/input 各自独立渲染，不依赖 `Renderable` trait（直接使用 ratatui Buffer API）
+- 状态栏算法：从右到左优先级排序，使用 `unicode_width` crate 计算 CJK 字符宽度，与 ratatui 内部一致
+- 输入框光标：使用 `Style::REVERSED`（反色）渲染，在任意终端主题下可见
+- StreamingRenderer 独立性：不集成到 chat.rs，为两区模型（markdown 重渲染 + commit 动画）预留接口
+
+- Affected files: `tui/Cargo.toml`, `tui/src/app.rs`, `tui/src/ui/mod.rs`, `tui/src/ui/status.rs`, `tui/src/ui/chat.rs`, `tui/src/ui/input.rs`, `tui/src/ui/tools.rs`, `tui/src/ui/streaming.rs`, `tui/src/main.rs`
+
 ## ChatWidget + Keymap: 聊天状态管理 + 键绑定 + 工具块折叠渲染
 
 ### Added

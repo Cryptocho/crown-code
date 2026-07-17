@@ -220,7 +220,11 @@ mod tests {
             key(KeyModifiers::CONTROL, KeyCode::Char('p')),
         ];
         for k in global_keys {
-            assert_eq!(map_input_key(k), map_chat_key(k), "global key mismatch: {k:?}");
+            assert_eq!(
+                map_input_key(k),
+                map_chat_key(k),
+                "global key mismatch: {k:?}"
+            );
         }
     }
 }

@@ -96,13 +96,7 @@ impl ChatWidget {
         }
     }
 
-    pub fn finish_tool_call(
-        &mut self,
-        call_id: &str,
-        _name: &str,
-        content: &str,
-        is_error: bool,
-    ) {
+    pub fn finish_tool_call(&mut self, call_id: &str, _name: &str, content: &str, is_error: bool) {
         if let Some(tracker) = self.tool_trackers.remove(call_id) {
             let elapsed = tracker.started_at.elapsed().as_millis() as u64;
             if let Some(cell) = self.cells.get_mut(tracker.cell_index)

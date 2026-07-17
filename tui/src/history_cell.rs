@@ -108,7 +108,11 @@ pub struct ToolCallCell {
 impl HistoryCell for ToolCallCell {
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
         let w = width as usize;
-        let fold = if self.expanded { "\u{25BC}" } else { "\u{25B6}" };
+        let fold = if self.expanded {
+            "\u{25BC}"
+        } else {
+            "\u{25B6}"
+        };
         let (status_icon, status_color) = match self.status {
             ToolCallStatus::Running => ("\u{27F3}", Color::Yellow),
             ToolCallStatus::Success => ("\u{2713}", Color::Green),
@@ -132,9 +136,10 @@ impl HistoryCell for ToolCallCell {
         }
         title.push_str(&tag);
 
-        let mut lines = vec![Line::from(vec![
-            Span::styled(format!("  {title}"), Style::default().fg(status_color)),
-        ])];
+        let mut lines = vec![Line::from(vec![Span::styled(
+            format!("  {title}"),
+            Style::default().fg(status_color),
+        )])];
 
         if self.expanded
             && let Some(ref output) = self.output
