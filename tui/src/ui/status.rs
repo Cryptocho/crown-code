@@ -28,130 +28,81 @@ pub fn status_bar_data_from_app(app: &App) -> StatusBarData<'_> {
 }
 
 pub fn render_status_bar(area: Rect, buf: &mut Buffer, data: &StatusBarData) {
-    if area.height == 0 {
+    if area.height == 0 || area.width == 0 {
         return;
     }
     let width = area.width as usize;
     let y = area.y;
-    let bg_style = Style::default().bg(Color::DarkGray);
-    let sep = " │ "; // 3 columns
 
-    let name_seg = data.session_name.unwrap_or("crown-code");
-    let token_seg = format!(
-        "In:{} Out:{} Cache R:{}",
+    let name = data.session_name.unwrap_or("crown-code");
+    let (status_label, status_color) = match data.status {
+        SessionStatus::Active => ("●", Color::Green),
+        SessionStatus::Completed => ("●", Color::Blue),
+        SessionStatus::Error => ("●", Color::Red),
+    };
+    let tokens = format!(
+        "In:{} Out:{} Cache:{}",
         data.input_tokens, data.output_tokens, data.cache_read_tokens
     );
-    let latency_seg = data.avg_latency_ms.map(|ms| format!("avg:{ms}ms"));
-    let status_icon = "●";
-    let status_color = match data.status {
-        SessionStatus::Active => Color::Green,
-        SessionStatus::Completed => Color::Blue,
-        SessionStatus::Error => Color::Red,
-    };
+    let latency = data
+        .avg_latency_ms
+        .map(|ms| format!("avg:{ms}ms"))
+        .unwrap_or_default();
 
-    // Build right side segments from lowest priority (P4) upward
-    let mut right: Vec<(&str, Color)> = Vec::new();
+    let sep = " │ ";
 
-    // P4: icon (always)
-    right.push((status_icon, status_color));
+    // Build segments from highest priority (name) to lowest (icon)
+    // Drop low-priority segments when width insufficient
+    let mut segments: Vec<&str> = vec![name];
+
+    // P2: tokens
+    let tokens_w = UnicodeWidthStr::width(tokens.as_str());
+    let used_after_name = UnicodeWidthStr::width(name) + sep_w(sep);
+    if used_after_name + tokens_w <= width {
+        segments.push(&tokens);
+    }
 
     // P3: latency
-    if let Some(ref lat) = latency_seg {
-        let candidate =
-            segments_width(&right, sep) + sep.len() + UnicodeWidthStr::width(lat.as_str());
-        if candidate <= width {
-            right.push((lat.as_str(), Color::Yellow));
+    let lat_w = UnicodeWidthStr::width(latency.as_str());
+    let used_after_tokens = used_after_name
+        + if segments.len() > 1 { tokens_w + sep_w(sep) } else { 0 };
+    if !latency.is_empty() && used_after_tokens + lat_w <= width {
+        segments.push(&latency);
+    }
+
+    // P4: status icon (always)
+    let used_after_latency = used_after_tokens
+        + if segments.len() > 2 { lat_w + sep_w(sep) } else { 0 };
+    let icon_w = UnicodeWidthStr::width(status_label);
+    if used_after_latency + icon_w <= width {
+        segments.push(status_label);
+    }
+
+    // Join all segments with separator
+    let display = segments.join(sep);
+    let truncated = truncate_str(&display, width);
+    let truncated_w = UnicodeWidthStr::width(truncated.as_str());
+
+    buf.set_string(area.x, y, &truncated, Style::default());
+
+    // Overwrite the icon with its color if it's in the truncated output
+    if segments.last() == Some(&status_label) {
+        let icon_str = truncate_str(status_label, width);
+        if let Some(pos) = truncated.rfind(icon_str.as_str()) {
+            let icon_x = area.x + UnicodeWidthStr::width(&truncated[..pos]) as u16;
+            buf.set_string(icon_x, y, &icon_str, Style::default().fg(status_color));
         }
     }
 
-    // P2: token
-    {
-        let candidate =
-            segments_width(&right, sep) + sep.len() + UnicodeWidthStr::width(token_seg.as_str());
-        if candidate <= width {
-            right.push((token_seg.as_str(), Color::White));
-        }
-    }
-
-    // Reverse so order is: token | latency | icon (leftmost in right side)
-    right.reverse();
-
-    let right_width = segments_width(&right, sep);
-    let has_right = !right.is_empty();
-
-    // Calculate name available width: total minus right side
-    // (right side includes separators between right segments)
-    // plus the separator " │ " between name and right
-    let name_avail = if has_right {
-        width.saturating_sub(right_width + sep.len())
-        // name_avail can be 0, that's fine
-        // but we need to ensure total doesn't exceed width
-    } else {
-        width
-    };
-    let name_display = truncate_str(name_seg, name_avail);
-    let name_w = UnicodeWidthStr::width(name_display.as_str());
-
-    let mut x: usize = area.x as usize;
-
-    // Render name
-    buf.set_string(x as u16, y, &name_display, bg_style);
-    x += name_w;
-
-    if has_right {
-        let right_space = right_width + sep.len();
-        let fill_needed = width - right_space - name_w;
-        for _ in 0..fill_needed {
-            buf.set_string(x as u16, y, " ", bg_style);
-            x += 1;
-        }
-
-        // Separator between name and right side
-        buf.set_string(
-            x as u16,
-            y,
-            sep,
-            Style::default().fg(Color::DarkGray).bg(Color::DarkGray),
-        );
-        x += sep.len();
-
-        // Right segments with inter-separators
-        for (i, (text, color)) in right.iter().enumerate() {
-            if i > 0 {
-                buf.set_string(
-                    x as u16,
-                    y,
-                    sep,
-                    Style::default().fg(Color::DarkGray).bg(Color::DarkGray),
-                );
-                x += sep.len();
-            }
-            buf.set_string(
-                x as u16,
-                y,
-                text,
-                Style::default().fg(*color).bg(Color::DarkGray),
-            );
-            x += UnicodeWidthStr::width(*text);
-        }
-    }
-
-    // Fill trailing spaces
-    while x < width {
-        buf.set_string(x as u16, y, " ", bg_style);
+    let mut x = area.x + truncated_w as u16;
+    while (x as usize) < area.x as usize + width {
+        buf.set_string(x, y, " ", Style::default());
         x += 1;
     }
 }
 
-fn segments_width(segments: &[(&str, Color)], sep: &str) -> usize {
-    if segments.is_empty() {
-        return 0;
-    }
-    let text_total: usize = segments
-        .iter()
-        .map(|(text, _)| UnicodeWidthStr::width(*text))
-        .sum();
-    text_total + sep.len() * (segments.len() - 1)
+fn sep_w(sep: &str) -> usize {
+    UnicodeWidthStr::width(sep)
 }
 
 fn truncate_str(s: &str, max_width: usize) -> String {
@@ -200,13 +151,39 @@ mod tests {
         assert!(content.contains("my project"));
         assert!(content.contains("In:1234"));
         assert!(content.contains("Out:567"));
-        assert!(content.contains("Cache R:890"));
+        assert!(content.contains("Cache:890"));
         assert!(content.contains("avg:230ms"));
         assert!(content.contains("●"));
     }
 
     #[test]
-    fn test_narrow_width_drops_low_priority() {
+    fn test_segments_flow_left_to_right() {
+        let area = Rect::new(0, 0, 80, 1);
+        let mut buf = Buffer::empty(area);
+        let data = StatusBarData {
+            session_name: Some("proj"),
+            input_tokens: 10,
+            output_tokens: 20,
+            cache_read_tokens: 30,
+            avg_latency_ms: Some(50),
+            status: &SessionStatus::Active,
+        };
+        render_status_bar(area, &mut buf, &data);
+        let content = buf_content(&buf, area);
+        // All segments should be contiguous, no gap between name and rest
+        let idx_proj = content.find("proj").unwrap();
+        let idx_in = content.find("In:10").unwrap();
+        let idx_avg = content.find("avg:50ms").unwrap();
+        let idx_icon = content.find("●").unwrap();
+        assert!(idx_proj < idx_in);
+        assert!(idx_in < idx_avg);
+        assert!(idx_avg < idx_icon);
+    }
+
+    #[test]
+    fn test_narrow_drops_tokens_first() {
+        // "my project" = 10, sep=3, latency=9, icon=1 → name+latency+icon = 23
+        // tokens = 25 → total would be 51 > 30, tokens dropped
         let area = Rect::new(0, 0, 30, 1);
         let mut buf = Buffer::empty(area);
         let data = StatusBarData {
@@ -220,13 +197,35 @@ mod tests {
         render_status_bar(area, &mut buf, &data);
         let content = buf_content(&buf, area);
         assert!(content.contains("my project"));
-        // In width 30, token (29 chars) doesn't fit with icon + latency + name + seps
         assert!(!content.contains("In:1234"));
+        assert!(content.contains("avg:230ms"));
+        assert!(content.contains("●"));
     }
 
     #[test]
-    fn test_very_narrow_truncates_name() {
-        let area = Rect::new(0, 0, 10, 1);
+    fn test_narrower_drops_latency() {
+        // "my project" = 10, sep=3, icon=1 → 14. latency=9 → 23 > 20
+        let area = Rect::new(0, 0, 20, 1);
+        let mut buf = Buffer::empty(area);
+        let data = StatusBarData {
+            session_name: Some("my project"),
+            input_tokens: 1234,
+            output_tokens: 567,
+            cache_read_tokens: 890,
+            avg_latency_ms: Some(230),
+            status: &SessionStatus::Active,
+        };
+        render_status_bar(area, &mut buf, &data);
+        let content = buf_content(&buf, area);
+        assert!(content.contains("my project"));
+        assert!(!content.contains("In:1234"));
+        assert!(!content.contains("avg:230ms"));
+        assert!(content.contains("●"));
+    }
+
+    #[test]
+    fn test_very_narrow_truncates() {
+        let area = Rect::new(0, 0, 5, 1);
         let mut buf = Buffer::empty(area);
         let data = StatusBarData {
             session_name: Some("a very long session name"),
@@ -237,32 +236,6 @@ mod tests {
             status: &SessionStatus::Active,
         };
         render_status_bar(area, &mut buf, &data);
-        // No panic
-    }
-
-    #[test]
-    fn test_status_colors() {
-        for (status, expected_color) in [
-            (SessionStatus::Active, Color::Green),
-            (SessionStatus::Completed, Color::Blue),
-            (SessionStatus::Error, Color::Red),
-        ] {
-            let area = Rect::new(0, 0, 80, 1);
-            let mut buf = Buffer::empty(area);
-            let data = StatusBarData {
-                session_name: None,
-                input_tokens: 0,
-                output_tokens: 0,
-                cache_read_tokens: 0,
-                avg_latency_ms: None,
-                status: &status,
-            };
-            render_status_bar(area, &mut buf, &data);
-            let status_cell = (0..80)
-                .find(|&x| buf[(x, 0)].symbol() == "●")
-                .expect("status indicator should be present");
-            assert_eq!(buf[(status_cell, 0)].style().fg, Some(expected_color));
-        }
     }
 
     #[test]
@@ -295,5 +268,48 @@ mod tests {
         render_status_bar(area, &mut buf, &data);
         let content = buf_content(&buf, area);
         assert!(content.contains("crown-code"));
+    }
+
+    #[test]
+    fn test_pipe_separator_style() {
+        let area = Rect::new(0, 0, 80, 1);
+        let mut buf = Buffer::empty(area);
+        let data = StatusBarData {
+            session_name: Some("proj"),
+            input_tokens: 10,
+            output_tokens: 20,
+            cache_read_tokens: 30,
+            avg_latency_ms: Some(50),
+            status: &SessionStatus::Active,
+        };
+        render_status_bar(area, &mut buf, &data);
+        let content = buf_content(&buf, area);
+        assert!(content.contains("proj"));
+        assert!(content.contains(" │ "));
+    }
+
+    #[test]
+    fn test_status_icon_colors() {
+        for (status, expected_color) in [
+            (SessionStatus::Active, Color::Green),
+            (SessionStatus::Completed, Color::Blue),
+            (SessionStatus::Error, Color::Red),
+        ] {
+            let area = Rect::new(0, 0, 80, 1);
+            let mut buf = Buffer::empty(area);
+            let data = StatusBarData {
+                session_name: None,
+                input_tokens: 0,
+                output_tokens: 0,
+                cache_read_tokens: 0,
+                avg_latency_ms: None,
+                status: &status,
+            };
+            render_status_bar(area, &mut buf, &data);
+            let icon_cell = (0..80)
+                .find(|&x| buf[(x, 0)].symbol() == "●")
+                .expect("status icon should be present");
+            assert_eq!(buf[(icon_cell, 0)].style().fg, Some(expected_color));
+        }
     }
 }

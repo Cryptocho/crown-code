@@ -1,5 +1,12 @@
 # Changelog
 
+## 状态栏简化：单行文本 + 管道符分隔 + 优先级裁剪
+
+### Refactored
+- `tui/src/ui/status.rs`：状态栏从右对齐多段布局简化为单行文本流式布局。所有段（name / tokens / latency / icon）用 `│` 管道符连接，从左到右整体排列。宽度不足时按优先级从低到高裁剪（P4 icon → P3 latency → P2 tokens → P1 name）。指示灯 `●` 保留颜色：green=active / blue=completed / red=error，其余段无 fg/bg 颜色。移除 `segments_width`/`truncate_str` 等旧辅助函数，保留 `truncate_str` 处理名称截断
+
+- Affected files: `tui/src/ui/status.rs`, `TODO.md`
+
 ## UI 渲染层：各面板 ratatui Widget 实现
 
 ### Added

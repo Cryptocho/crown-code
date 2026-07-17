@@ -23,7 +23,7 @@ async fn main() -> anyhow::Result<()> {
     let (app_event_tx, _app_event_rx) = mpsc::unbounded_channel();
     let mut app = App::new("local".into(), AppEventSender::new(app_event_tx));
     app.model = "local".into();
-    app.session_name = Some("我的测试项目".into());
+    app.session_name = Some("测试项目".into());
     app.input_tokens = 1234;
     app.output_tokens = 567;
     app.cache_read_tokens = 890;

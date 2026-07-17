@@ -685,7 +685,7 @@ pub fn handle_key(key: KeyEvent, app: &mut App) -> bool;  // 返回 true 表示�
 
 - [x] `tui/src/ui/mod.rs` — UI 渲染入口，使用 ratatui `Layout` 组合三区域（状态栏1行 + 聊天面板Min(1) + 输入栏2行）
 
-- [x] `tui/src/ui/status.rs` — 状态栏渲染（优先级从低到高：P4 status icon / P3 latency / P2 token / P1 name，从右到左组装，宽度不足时自动裁剪）
+- [x] `tui/src/ui/status.rs` — 状态栏渲染（单行文本，管道符分隔，P4 icon → P3 latency → P2 tokens → P1 name 优先级裁剪，指示灯带颜色）
 
 - [x] `tui/src/ui/chat.rs` — 聊天面板渲染（`buf.set_line` 逐行渲染，scroll_offset 支持滚动）
 
