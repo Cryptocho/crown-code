@@ -9,123 +9,141 @@ mod renderable;
 mod tui;
 mod ui;
 
-use crate::app::{App, FocusTarget};
-use crate::app_event::AppEventSender;
+use std::time::Duration;
+
+use crate::app::App;
+use crate::app_event::{AppEvent, AppEventSender};
 use crate::event::TuiEvent;
-use crate::history_cell::{AssistantMessageCell, UserMessageCell};
+use crate::ipc::IpcClient;
 use crate::tui::Tui;
+use crown_core::ipc::transport::resolve_socket_path;
 use tokio::sync::mpsc;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let args: Vec<String> = std::env::args().collect();
+    let socket_path = resolve_socket_path(
+        args.iter()
+            .position(|a| a == "--socket-path")
+            .and_then(|i| args.get(i + 1))
+            .map(|s| s.as_str()),
+    );
+
+    let (ipc, mut ipc_reader) = match IpcClient::connect(&socket_path).await {
+        Ok(pair) => pair,
+        Err(e) => {
+            eprintln!("Failed to connect to crown-core daemon at {socket_path}: {e}");
+            eprintln!("Make sure crown-core is running first.");
+            std::process::exit(1);
+        }
+    };
+
+    let session_result = ipc
+        .send_request(
+            "create_session",
+            serde_json::json!({
+                "cwd": std::env::current_dir()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_else(|_| ".".to_string()),
+            }),
+        )
+        .await;
+    let session_id = match session_result {
+        Ok(val) => val["session_id"]
+            .as_str()
+            .unwrap_or("sess_unknown")
+            .to_string(),
+        Err(e) => {
+            eprintln!("Failed to create session: {e}");
+            std::process::exit(1);
+        }
+    };
+
     let mut tui = Tui::init()?;
 
-    let (app_event_tx, _app_event_rx) = mpsc::unbounded_channel();
-    let mut app = App::new("local".into(), AppEventSender::new(app_event_tx));
-    app.model = "local".into();
-    app.session_name = Some("测试项目".into());
-    app.input_tokens = 1234;
-    app.output_tokens = 567;
-    app.cache_read_tokens = 890;
-    app.api_latencies = std::collections::VecDeque::from([230, 180, 250]);
-    app.needs_redraw = true;
+    let original_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let _ = Tui::restore();
+        original_hook(info);
+    }));
 
-    app.chat_widget.push_cell(Box::new(UserMessageCell {
-        content: "读取 main.rs".into(),
-    }));
-    app.chat_widget.push_cell(Box::new(AssistantMessageCell {
-        content: "好的，我来读取...\n这是第二行内容，用于测试多行显示效果。".into(),
-        is_streaming: false,
-    }));
-    app.chat_widget
-        .start_tool_call("c1", "read_file", "/tmp/test.rs");
-    std::thread::sleep(std::time::Duration::from_millis(10));
-    app.chat_widget
-        .finish_tool_call("c1", "read_file", "content here", false);
-    app.chat_widget.push_cell(Box::new(AssistantMessageCell {
-        content: "文件已读取，内容如下。".into(),
-        is_streaming: false,
-    }));
+    let (app_event_tx, mut app_event_rx) = mpsc::unbounded_channel::<AppEvent>();
+    let mut app = App::new(session_id.clone(), AppEventSender::new(app_event_tx));
+
+    let mut draw_interval = tokio::time::interval(Duration::from_millis(50));
 
     loop {
-        if app.needs_redraw {
-            tui.draw(|f| {
-                ui::render(f, &app);
-            })?;
-            app.needs_redraw = false;
-        }
+        tokio::select! {
+            biased;
 
-        if let Some(event) = tui.event_receiver().recv().await {
-            match event {
-                TuiEvent::Key(k) => {
-                    if app.focus == FocusTarget::Input {
-                        let action = keymap::map_input_key(k);
-                        match action {
-                            keymap::KeyAction::Quit => break,
-                            keymap::KeyAction::FocusNext => {
-                                app.focus = FocusTarget::ChatPanel;
-                                app.needs_redraw = true;
-                            }
-                            keymap::KeyAction::CycleAgentMode => {
-                                app.agent_mode = app.agent_mode.cycle();
-                                app.needs_redraw = true;
-                            }
-                            keymap::KeyAction::SubmitMessage => {
-                                let msg = app.chat_widget.take_input();
-                                if !msg.trim().is_empty() {
-                                    app.chat_widget
-                                        .push_cell(Box::new(UserMessageCell { content: msg }));
-                                }
-                                app.needs_redraw = true;
-                            }
-                            _ => {
-                                app.chat_widget.input_key(k);
-                                app.needs_redraw = true;
-                            }
-                        }
-                    } else {
-                        let action = keymap::map_chat_key(k);
-                        match action {
-                            keymap::KeyAction::Quit => break,
-                            keymap::KeyAction::FocusNext => {
-                                app.focus = FocusTarget::Input;
-                                app.needs_redraw = true;
-                            }
-                            keymap::KeyAction::ScrollUp(n) => {
-                                app.chat_widget.scroll_up(n);
-                                app.needs_redraw = true;
-                            }
-                            keymap::KeyAction::ScrollDown(n) => {
-                                app.chat_widget.scroll_down(n);
-                                app.needs_redraw = true;
-                            }
-                            keymap::KeyAction::ScrollToBottom => {
-                                app.chat_widget.scroll_to_bottom();
-                                app.needs_redraw = true;
-                            }
-                            keymap::KeyAction::ToggleToolExpand => {
-                                for (i, cell) in app.chat_widget.cells.iter().enumerate() {
-                                    if cell.as_tool_call().is_some() {
-                                        app.chat_widget.toggle_tool_expanded(i);
-                                        break;
-                                    }
-                                }
-                                app.needs_redraw = true;
-                            }
-                            _ => {
-                                app.needs_redraw = true;
-                            }
-                        }
+            Some(tui_event) = tui.event_receiver().recv() => {
+                match tui_event {
+                    TuiEvent::Key(key) => {
+                        app.handle_key(key);
+                    }
+                    TuiEvent::Paste(text) => {
+                        app.handle_paste(&text);
+                    }
+                    TuiEvent::Resize => {
+                        app.needs_redraw = true;
+                    }
+                    TuiEvent::Draw => {}
+                }
+            }
+
+            Some(msg) = ipc_reader.read_message() => {
+                app.handle_ipc_message(msg);
+            }
+
+            Some(event) = app_event_rx.recv() => {
+                match &event {
+                    AppEvent::UserMessageSent(text) => {
+                        let text = text.clone();
+                        app.handle_app_event(event);
+                        let _ = ipc.send_request(
+                            "user_message",
+                            serde_json::json!({
+                                "session_id": app.session_id.as_deref().unwrap_or(""),
+                                "content": text,
+                            }),
+                        ).await;
+                    }
+                    AppEvent::CancelRequested => {
+                        app.handle_app_event(AppEvent::CancelRequested);
+                        let _ = ipc.send_request(
+                            "cancel",
+                            serde_json::json!({
+                                "session_id": app.session_id.as_deref().unwrap_or(""),
+                            }),
+                        ).await;
+                    }
+                    _ => {
+                        app.handle_app_event(event);
                     }
                 }
-                TuiEvent::Resize => {
-                    app.needs_redraw = true;
-                }
-                _ => {}
             }
+
+            _ = draw_interval.tick() => {
+                if app.needs_redraw {
+                    if let Err(e) = tui.draw(|f| ui::render(f, &app)) {
+                        eprintln!("draw error: {e}");
+                    }
+                    app.needs_redraw = false;
+                }
+            }
+        }
+
+        if app.should_quit {
+            break;
         }
     }
 
+    let _ = ipc
+        .send_notification(
+            "destroy_session",
+            serde_json::json!({"session_id": session_id}),
+        )
+        .await;
     let _ = Tui::restore();
     Ok(())
 }

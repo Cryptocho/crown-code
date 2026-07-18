@@ -334,4 +334,175 @@ mod tests {
         assert!(r1.is_ok());
         assert!(r2.is_ok());
     }
+
+    #[tokio::test]
+    async fn test_full_roundtrip_user_message_and_events() {
+        let (_server, path) = start_server().await;
+
+        let (client, mut reader) = IpcClient::connect(&path).await.unwrap();
+
+        let result = client
+            .send_request("create_session", serde_json::json!({"cwd": "/tmp"}))
+            .await
+            .unwrap();
+        let session_id = result["session_id"].as_str().unwrap().to_string();
+
+        let resp = client
+            .send_request(
+                "user_message",
+                serde_json::json!({
+                    "session_id": session_id,
+                    "content": "hello",
+                }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp["ok"], true);
+
+        let mut got_event = false;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        while tokio::time::Instant::now() < deadline {
+            match tokio::time::timeout(Duration::from_secs(2), reader.read_message()).await {
+                Ok(Some(msg)) => {
+                    if msg.is_notification() {
+                        got_event = true;
+                        let method = msg.method.as_deref().unwrap_or("");
+                        assert!(
+                            [
+                                "assistant_text",
+                                "error",
+                                "tool_call_start",
+                                "usage",
+                                "task_done"
+                            ]
+                            .contains(&method),
+                            "unexpected event method: {method}"
+                        );
+                        if let Some(params) = &msg.params {
+                            assert_eq!(params["session_id"].as_str(), Some(session_id.as_str()));
+                        }
+                        if method == "error" || method == "task_done" {
+                            break;
+                        }
+                    }
+                }
+                Ok(None) => break,
+                Err(_) => {} // timeout, keep waiting until deadline
+            }
+        }
+        assert!(
+            got_event,
+            "should have received at least one event from core"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_cancel_during_agent_loop() {
+        let (_server, path) = start_server().await;
+
+        let (client, mut reader) = IpcClient::connect(&path).await.unwrap();
+        let result = client
+            .send_request("create_session", serde_json::json!({"cwd": "/tmp"}))
+            .await
+            .unwrap();
+        let session_id = result["session_id"].as_str().unwrap().to_string();
+
+        let _ = client
+            .send_request(
+                "user_message",
+                serde_json::json!({
+                    "session_id": session_id,
+                    "content": "write a very long essay",
+                }),
+            )
+            .await;
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let resp = client
+            .send_request(
+                "cancel",
+                serde_json::json!({
+                    "session_id": session_id,
+                }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp["ok"], true);
+
+        let mut got_cancel = false;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        while tokio::time::Instant::now() < deadline {
+            match tokio::time::timeout(Duration::from_secs(2), reader.read_message()).await {
+                Ok(Some(msg)) => {
+                    if msg.method.as_deref() == Some("error") {
+                        if let Some(params) = &msg.params {
+                            if params["message"].as_str() == Some("task cancelled") {
+                                got_cancel = true;
+                                break;
+                            }
+                        }
+                    }
+                    if msg.method.as_deref() == Some("task_done") {
+                        break;
+                    }
+                }
+                Ok(None) => break,
+                Err(_) => {} // timeout, keep waiting until deadline
+            }
+        }
+        assert!(
+            got_cancel,
+            "should have received task cancelled error event"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_create_and_destroy_session_roundtrip() {
+        let (_server, path) = start_server().await;
+
+        let (client, _reader) = IpcClient::connect(&path).await.unwrap();
+
+        let create_result = client
+            .send_request("create_session", serde_json::json!({"cwd": "/tmp"}))
+            .await
+            .unwrap();
+        let session_id = create_result["session_id"].as_str().unwrap().to_string();
+        assert!(session_id.starts_with("sess_"));
+
+        let list_result = client
+            .send_request("list_sessions", serde_json::json!({}))
+            .await
+            .unwrap();
+        let sessions = list_result["sessions"].as_array().unwrap();
+        assert!(!sessions.is_empty());
+
+        let destroy_result = client
+            .send_request(
+                "destroy_session",
+                serde_json::json!({"session_id": session_id}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(destroy_result["ok"], true);
+    }
+
+    #[tokio::test]
+    async fn test_cancel_unknown_session_returns_error() {
+        let (_server, path) = start_server().await;
+
+        let (client, _reader) = IpcClient::connect(&path).await.unwrap();
+        let result = client
+            .send_request(
+                "cancel",
+                serde_json::json!({"session_id": "sess_nonexistent"}),
+            )
+            .await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            IpcError::RpcError { code, .. } => {
+                assert_eq!(code, crown_core::ipc::message::SESSION_NOT_FOUND);
+            }
+            other => panic!("expected RpcError, got: {other:?}"),
+        }
+    }
 }

@@ -1,5 +1,20 @@
 # Changelog
 
+## App 状态机重构：handle_key/handle_paste/handle_ipc_message + tool cursor
+
+### Added
+- `tui/src/app.rs`：新增 `handle_key(KeyEvent)` 方法，将 `main.rs` 事件循环中的 key dispatch 逻辑移入 App。支持所有 KeyAction（Quit/Cancel/CycleAgentMode/SubmitMessage/FocusNext/ScrollUp/ScrollDown/ScrollToBottom/ToggleToolExpand/None），`ToggleToolExpand` 使用 `tool_cursor` 替代原来的"查找第一个 ToolCallCell"逻辑
+- `tui/src/app.rs`：新增 `handle_paste(&str)` 方法，将 `main.rs` 中的粘贴处理逻辑移入 App。焦点在 Input 时逐字符转换为 KeyEvent 插入；焦点在 ChatPanel 时忽略
+- `tui/src/app.rs`：新增 `handle_ipc_message(JsonRpcMessage)` 方法，合并 `parse_ipc_event` + `handle_app_event` 调用
+- `tui/src/chatwidget.rs`：新增 `tool_cursor: Option<usize>` 字段，`current_tool_index()` / `next_tool_call()` / `prev_tool_call()` 方法。`start_tool_call()` 自动将 `tool_cursor` 更新为新 cell 的 index
+- `tui/src/app.rs`：新增 9 个单元测试（handle_key_quit/cycle_mode/submit_message/scroll/toggle_tool/input_passthrough、handle_paste_in_input/in_chat_panel、handle_ipc_message）
+- `tui/src/chatwidget.rs`：新增 3 个单元测试（tool_cursor_auto_update、next_prev_tool_call、current_tool_index_none_when_no_tools）
+
+### Refactored
+- `tui/src/main.rs`：简化事件循环，`TuiEvent::Key` → `app.handle_key(key)`，`TuiEvent::Paste` → `app.handle_paste(&text)`，IPC 消息 → `app.handle_ipc_message(msg)`。移除 `FocusTarget` 未使用导入
+
+- Affected files: `tui/src/app.rs`, `tui/src/chatwidget.rs`, `tui/src/main.rs`
+
 ## 状态栏简化：单行文本 + 管道符分隔 + 优先级裁剪
 
 ### Refactored
@@ -101,7 +116,6 @@
 - `core/src/agent/loop.rs`：将 `run_agent_loop` 的内层 agent loop 提取为 `AgentSession::handle_user_message`，所有终端 I/O（print!/eprintln!/stdin.read_line）替换为 `AgentEventHandler` 回调；`run_agent_loop` 重构为 `AgentSession` 的 CLI 薄包装
 - `core/src/ipc/session_manager.rs`：`SessionState` 移除 `history`/`cancelled` 字段，新增 `agent: AgentSession`；`SessionManager` 新增 `cancel_flags` 独立 RwLock map，锁顺序统一为 `sessions → cancel_flags` 避免死锁
 - `core/src/ipc/server.rs`：`user_message` handler 改为 `tokio::spawn` 异步执行 `state.agent.handle_user_message()`，`cancel` handler 使用 `sm.cancel_session()`（无需锁 SessionState，无死锁风险）；移除 3 个未使用 import
-- `test_user_message_stub_events` 标记为 `#[ignore]`（需真实 API）
 
 - Affected files: `core/src/agent/loop.rs`, `core/src/ipc/session_manager.rs`, `core/src/ipc/server.rs`
 
@@ -190,7 +204,7 @@
 ### Added
 - `core/src/api/types.rs`：OpenAI Compatible API 核心类型定义（Rust 重写）。公共类型：`MessageRole`（System/User/Assistant/Tool/Developer，带 Display/FromStr）、`Message`（role/content/tool_calls/tool_call_id/name，带 `to_json_value` 处理 content null/tool_call_id 边缘情况）、`Tool`（name/description/parameters）、`ToolCall`（id/function_name/arguments/tc_index）、`ApiStreamChunk`（Rust enum：Text/Reasoning/Usage/ToolCall/Done）、`ApiError`（code/message）、`ApiUsage`（input_tokens/output_tokens/cache_read_tokens）、`ApiResponse`（content/tool_calls/usage/error/finish_reason）、`ApiClientConfig`（base_url/api_key/model/temperature/max_tokens/stream_options）、`ApiClient`（config/http: HttpTransport）
 - `core/src/api/openai.rs`：OpenAI Compatible API 客户端（Rust 重写）。公共 API：`new_client`（工厂函数，自动追加 `/chat/completions`）、`build_chat_request`（非流式 JSON 请求体构建，含 messages/tools/stream/temperature/max_tokens）、`parse_chat_response`（非流式 JSON 响应解析，含 error/choices/tool_calls/usage/finish_reason）、`create_message`（非流式请求全流程：buildChatRequest→postJson→parseChatResponse）、`parse_stream_event`（单行 SSE data 解析，返回 Vec<ApiStreamChunk>，支持 text/reasoning/tool_calls/usage/DONE/error/JSON parse error 七种场景）、`create_message_stream`（流式请求全流程：buildChatRequest(stream:true)→postJsonStream→tool call delta 累积→返回 ApiResponse）。tool call delta 累积：`HashMap<i32, ToolCall>` 按 index 并行累积 id/function_name/arguments
-- 测试：51 个单元测试 + 4 个集成测试（`#[ignore]`，需要 OPENROUTER_API_KEY）。类型测试 20 个（MessageRole/Message/Tool/ToolCall/ApiStreamChunk/ApiResponse/ApiClientConfig 构造），非流式 API 测试 16 个（buildChatRequest JSON 结构/messages 转换/tools 字段/parseChatResponse 正常/异常/空场景），流式 API 测试 15 个（parseStreamEvent 各 variant/SSE 注释忽略/单 tool call 跨 chunk 累积/多 tool call 并行累积）
+- 测试：51 个单元测试 + 4 个集成测试。类型测试 20 个（MessageRole/Message/Tool/ToolCall/ApiStreamChunk/ApiResponse/ApiClientConfig 构造），非流式 API 测试 16 个（buildChatRequest JSON 结构/messages 转换/tools 字段/parseChatResponse 正常/异常/空场景），流式 API 测试 15 个（parseStreamEvent 各 variant/SSE 注释忽略/单 tool call 跨 chunk 累积/多 tool call 并行累积）
 
 ### Changed
 - `core/src/api/mod.rs`：新建，导出 `pub mod types; pub mod openai;`

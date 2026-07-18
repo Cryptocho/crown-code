@@ -230,9 +230,7 @@ async fn dispatch_request(
             sm.update_config(config).await;
             make_response(id, serde_json::json!({"ok": true}))
         }
-        METHOD_SET_AGENT_MODE => {
-            make_response(id, serde_json::json!({"ok": true}))
-        }
+        METHOD_SET_AGENT_MODE => make_response(id, serde_json::json!({"ok": true})),
         _ => make_error_response(
             id,
             METHOD_NOT_FOUND,

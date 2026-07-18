@@ -4,14 +4,14 @@
 
 ```
 ┌──────────────┐  ┌──────────────┐  ┌──────────────┐
-│  tui (终端A)  │  │  tui (终端B) │  │  gui (未来)   │
+│  tui (终端A)  │  │  tui (终端B) │  │  webui (未来) │
 │  ratatui     │  │  ratatui        |              | 
 │  thin client │  │  thin client │  │  thin client │
 └──────┬───────┘  └──────┬───────┘  └──────┬───────┘
        │                 │                 │
        │  Local socket (跨平台)             │
-       │                  │                 │
-       └─────────┬────────┴────────┬────────┘
+       │                  │                │
+       └─────────┬────────┴────────┬───────┘
                  │                 │
           ┌──────┴─────────────────┴──────┐
           │     crown-core (daemon)       │
@@ -703,7 +703,7 @@ pub fn handle_key(key: KeyEvent, app: &mut App) -> bool;  // 返回 true 表示�
 
 > 目标：App 持有所有子组件状态，实现事件处理方法，为 main.rs 事件循环提供接口
 
-- [ ] `tui/src/app.rs` — App 状态机：
+- [x] `tui/src/app.rs` — App 状态机：
 
 ```rust
 pub struct App {
@@ -762,7 +762,7 @@ pub enum SessionStatus {
     - `Quit` → `should_quit = true`
   - `request_redraw()`：设置 `needs_redraw = true`
 
-- [ ] 验证：App 单元测试（构造、事件处理、状态转换），cargo build 通过
+- [x] 验证：App 单元测试（构造、事件处理、状态转换），cargo build 通过
 
 ### 1.7 TUI: `main.rs` 入口 + 主事件循环
 
@@ -980,11 +980,117 @@ _ = draw_interval.tick() => {
 - [ ] Act Mode：正常执行
 - [ ] 用户可在两种模式间切换
 
-### 4.5 GUI / WebUI 前端
+### 4.5 WebUI 前端
 
-- [ ] Core IPC 扩展支持 TCP/WebSocket
-- [ ] GUI 前端（egui / Tauri / Slint）
-- [ ] WebUI 前端（WebSocket + React）
+#### IPC 通信架构设计（多前端支持）
+
+**核心原则**：协议统一，transport 解耦。
+
+**设计决策**：
+1. **IPC 必须保留**：IPC 是 core 与所有前端的通信基础
+2. **TUI 和 WebUI 使用相同的 JSON-RPC 2.0 协议**，但不同的 transport
+3. **Transport 层可插拔**：`IpcConnection` 抽象为 trait，不同前端用不同实现
+
+**架构概览**：
+
+```
+┌──────────────┐     ┌──────────────┐
+│  TUI         │     │  WebUI       │
+│  thin client │     │  thin client │
+└──────┬───────┘     └──────┬───────┘
+       │                    │
+       │ LocalSocket        │ WebSocket
+       │ Transport          │ Transport
+       │                    │
+       └────────┬───────────┘
+                │
+    ┌───────────┴───────────┐
+    │   Core IPC Server     │
+    │                       │
+    │  ┌─────────────────┐  │
+    │  │ Transport 路由   │  │ ← 统一接口: AsyncRead + AsyncWrite
+    │  │  - local socket  │  │
+    │  │  - websocket     │  │
+    │  └────────┬────────┘  │
+    │           │           │
+    │  ┌────────┴────────┐  │
+    │  │ JSON-RPC 2.0    │  │ ← 协议层，所有前端共享
+    │  │ message.rs      │  │
+    │  └────────┬────────┘  │
+    │           │           │
+    │  ┌────────┴────────┐  │
+    │  │ Session Manager │  │ ← 业务逻辑，完全复用
+    │  │ server.rs       │  │
+    │  └─────────────────┘  │
+    └───────────────────────┘
+```
+
+**Transport 控制策略**：
+
+| | TUI (本地终端) | WebUI (浏览器) |
+|---|---|---|
+| **可用 transport** | Unix domain socket / named pipe | WebSocket / HTTP SSE |
+| **延迟要求** | <1ms (进程间) | ~10ms (网络) |
+| **端口管理** | 不需要（文件路径） | 需要（TCP 端口） |
+| **认证** | 不需要（文件权限） | 需要（token/CORS） |
+| **典型实现** | `interprocess` crate | `axum` + `tokio-tungstenite` |
+
+**为什么不用 UDP**：
+- **丢包不可接受**：LLM 流式输出每个 token 都重要，丢包导致语义断裂
+- **乱序不可接受**：UDP 无序，"我来帮你"可能收到 "帮来我你"
+- **无流控**：接收端处理慢时直接丢包，WebSocket 的背压机制自动处理
+- **浏览器不支持**：浏览器没有原生 UDP socket API，WebTransport 需要 HTTP/3 且兼容性差
+- **数据量极小**：20 tok/s ≈ 80 bytes/sec，UDP 的低开销优势无意义
+
+**结论：WebSocket over TCP，不是 UDP。**
+
+**流式延迟预算**：
+```
+LLM API 生成 token        ~50-500ms/次  ← 主要延迟来源（取决于模型）
+Core SSE 解析 + JSON-RPC  <1ms
+WebSocket 传输（本地）     <1ms
+WebSocket 传输（远程）     ~10-50ms
+React state + DOM 渲染     ~16ms (60fps 一帧)
+
+总延迟（本地）：~70-520ms
+总延迟（远程）：~80-570ms
+```
+
+**Transport Trait 设计**：
+
+```rust
+#[async_trait]
+pub trait Transport: Send + 'static {
+    async fn read_message(&mut self) -> Result<Option<JsonRpcMessage>, IpcTransportError>;
+    async fn write_message(&mut self, msg: &JsonRpcMessage) -> Result<(), IpcTransportError>;
+}
+
+// 现有实现（保留）
+pub struct LocalSocketTransport { ... }  // interprocess local socket
+
+// Phase 4.5 新增
+pub struct WebSocketTransport { ... }    // axum WebSocket
+pub struct TcpTransport { ... }          // TCP socket (可选)
+```
+
+`IpcServer` 的 `accept()` 支持多种 listener：
+
+```rust
+pub struct IpcServer {
+    local_listener: Option<IpcTransport>,      // 现有
+    ws_listener: Option<WsTransport>,          // Phase 4.5 新增
+    session_manager: Arc<SessionManager>,      // 完全复用
+}
+```
+
+#### 功能清单
+
+- [ ] Transport trait 抽象：`IpcConnection` 改为 `dyn Transport`，支持多种 transport 实现
+- [ ] Core 新增 WebSocket listener（`axum` HTTP server + WebSocket endpoint）
+- [ ] Core：`IpcServer` 同时监听 local socket（TUI）和 WebSocket（WebUI）
+- [ ] WebUI 前端：TypeScript / React，WebSocket client（自动重连）
+- [ ] 流式渲染：逐 token 追加到 DOM，响应式状态管理
+- [ ] 可选：Electron 打包为桌面应用
 
 ---
 

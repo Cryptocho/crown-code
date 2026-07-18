@@ -141,7 +141,7 @@ impl HttpTransport {
         json_body: &str,
         mut on_event: impl FnMut(SseEvent) -> bool,
     ) -> (i32, String) {
-        let response = match self
+        let mut response = match self
             .client
             .post(&self.base_url)
             .bearer_auth(&self.bearer_token)
@@ -173,22 +173,25 @@ impl HttpTransport {
         }
 
         let mut parser = SseParser::new();
-        match response.bytes().await {
-            Ok(bytes) => {
-                let chunk = String::from_utf8_lossy(&bytes);
-                for evt in parser.feed(&chunk) {
-                    if !on_event(evt) {
-                        return (status_code, String::new());
+        loop {
+            match response.chunk().await {
+                Ok(Some(bytes)) => {
+                    let chunk = String::from_utf8_lossy(&bytes);
+                    for evt in parser.feed(&chunk) {
+                        if !on_event(evt) {
+                            return (status_code, String::new());
+                        }
                     }
                 }
-                for evt in parser.flush() {
-                    if !on_event(evt) {
-                        break;
-                    }
+                Ok(None) => break,
+                Err(e) => {
+                    return (status_code, format!("read error: {}", e));
                 }
             }
-            Err(e) => {
-                return (status_code, format!("read error: {}", e));
+        }
+        for evt in parser.flush() {
+            if !on_event(evt) {
+                break;
             }
         }
 

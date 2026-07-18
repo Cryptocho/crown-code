@@ -37,6 +37,13 @@ pub enum AppEvent {
     },
 
     RedrawRequested,
+
+    SessionCreated {
+        session_id: String,
+    },
+    SessionNameUpdate {
+        name: String,
+    },
 }
 
 pub struct AppEventSender {

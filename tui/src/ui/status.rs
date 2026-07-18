@@ -65,14 +65,22 @@ pub fn render_status_bar(area: Rect, buf: &mut Buffer, data: &StatusBarData) {
     // P3: latency
     let lat_w = UnicodeWidthStr::width(latency.as_str());
     let used_after_tokens = used_after_name
-        + if segments.len() > 1 { tokens_w + sep_w(sep) } else { 0 };
+        + if segments.len() > 1 {
+            tokens_w + sep_w(sep)
+        } else {
+            0
+        };
     if !latency.is_empty() && used_after_tokens + lat_w <= width {
         segments.push(&latency);
     }
 
     // P4: status icon (always)
     let used_after_latency = used_after_tokens
-        + if segments.len() > 2 { lat_w + sep_w(sep) } else { 0 };
+        + if segments.len() > 2 {
+            lat_w + sep_w(sep)
+        } else {
+            0
+        };
     let icon_w = UnicodeWidthStr::width(status_label);
     if used_after_latency + icon_w <= width {
         segments.push(status_label);

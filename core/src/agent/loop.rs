@@ -100,6 +100,11 @@ impl AgentSession {
                 break;
             }
 
+            if self.cancelled.load(Ordering::SeqCst) {
+                handler.on_error(0, "task cancelled");
+                break;
+            }
+
             let tool_calls = resp.tool_calls;
 
             self.history.push(Message {
@@ -116,6 +121,12 @@ impl AgentSession {
 
             let mut has_completion = false;
             for tc in &tool_calls {
+                if self.cancelled.load(Ordering::SeqCst) {
+                    handler.on_error(0, "task cancelled");
+                    has_completion = true;
+                    break;
+                }
+
                 handler.on_tool_call_start(&tc.id, &tc.function_name, &tc.arguments);
 
                 let args: serde_json::Value = match serde_json::from_str(&tc.arguments) {

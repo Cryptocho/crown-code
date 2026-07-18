@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::time::Instant;
-
 use tui_textarea::TextArea;
 
 use crate::history_cell::{
@@ -19,6 +18,7 @@ pub struct ChatWidget {
     pub textarea: TextArea<'static>,
     pub scroll_offset: usize,
     pub auto_scroll: bool,
+    pub tool_cursor: Option<usize>,
     tool_trackers: HashMap<String, ToolCallTracker>,
 }
 
@@ -32,6 +32,7 @@ impl ChatWidget {
             textarea,
             scroll_offset: 0,
             auto_scroll: true,
+            tool_cursor: None,
             tool_trackers: HashMap::new(),
         }
     }
@@ -59,6 +60,34 @@ impl ChatWidget {
             self.cells.push(cell);
             if self.auto_scroll {
                 self.scroll_offset = 0;
+            }
+        }
+    }
+
+    pub fn current_tool_index(&self) -> Option<usize> {
+        self.tool_cursor.filter(|&idx| self.is_tool_call(idx))
+    }
+
+    pub fn next_tool_call(&mut self) {
+        let start = self.tool_cursor.map(|i| i + 1).unwrap_or(0);
+        for i in start..self.cells.len() {
+            if self.is_tool_call(i) {
+                self.tool_cursor = Some(i);
+                return;
+            }
+        }
+    }
+
+    pub fn prev_tool_call(&mut self) {
+        if let Some(current) = self.tool_cursor {
+            for i in (0..current).rev() {
+                if self.is_tool_call(i) {
+                    self.tool_cursor = Some(i);
+                    return;
+                }
+            }
+            if !self.is_tool_call(current) {
+                self.tool_cursor = None;
             }
         }
     }
@@ -94,6 +123,7 @@ impl ChatWidget {
         if self.auto_scroll {
             self.scroll_offset = 0;
         }
+        self.tool_cursor = Some(self.cells.len() - 1);
     }
 
     pub fn finish_tool_call(&mut self, call_id: &str, _name: &str, content: &str, is_error: bool) {
@@ -345,5 +375,66 @@ mod tests {
 
         w.start_streaming();
         assert_eq!(w.total_rendered_lines(80), 2);
+    }
+
+    #[test]
+    fn test_tool_cursor_auto_update() {
+        let mut w = ChatWidget::new();
+        assert_eq!(w.current_tool_index(), None);
+
+        w.start_tool_call("c1", "read_file", "{}");
+        assert_eq!(w.current_tool_index(), Some(0));
+
+        w.push_cell(Box::new(UserMessageCell {
+            content: "hi".into(),
+        }));
+        w.start_tool_call("c2", "write_file", "{}");
+        assert_eq!(w.current_tool_index(), Some(2));
+    }
+
+    #[test]
+    fn test_next_prev_tool_call() {
+        let mut w = ChatWidget::new();
+        w.push_cell(Box::new(UserMessageCell {
+            content: "u1".into(),
+        }));
+        w.start_tool_call("c1", "read_file", "{}");
+        w.push_cell(Box::new(UserMessageCell {
+            content: "u2".into(),
+        }));
+        w.start_tool_call("c2", "write_file", "{}");
+        w.push_cell(Box::new(UserMessageCell {
+            content: "u3".into(),
+        }));
+        w.start_tool_call("c3", "search", "{}");
+
+        assert_eq!(w.current_tool_index(), Some(5));
+
+        w.prev_tool_call();
+        assert_eq!(w.current_tool_index(), Some(3));
+
+        w.prev_tool_call();
+        assert_eq!(w.current_tool_index(), Some(1));
+
+        w.prev_tool_call();
+        assert_eq!(w.current_tool_index(), Some(1));
+
+        w.next_tool_call();
+        assert_eq!(w.current_tool_index(), Some(3));
+
+        w.next_tool_call();
+        assert_eq!(w.current_tool_index(), Some(5));
+
+        w.next_tool_call();
+        assert_eq!(w.current_tool_index(), Some(5));
+    }
+
+    #[test]
+    fn test_current_tool_index_none_when_no_tools() {
+        let mut w = ChatWidget::new();
+        w.push_cell(Box::new(UserMessageCell {
+            content: "hi".into(),
+        }));
+        assert_eq!(w.current_tool_index(), None);
     }
 }
