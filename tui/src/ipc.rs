@@ -505,4 +505,34 @@ mod tests {
             other => panic!("expected RpcError, got: {other:?}"),
         }
     }
+
+    #[tokio::test]
+    async fn test_disconnect_and_reconnect() {
+        let (_server, path) = start_server().await;
+        let (client, mut reader) = IpcClient::connect(&path).await.unwrap();
+
+        let r = client
+            .send_request("create_session", serde_json::json!({"cwd": "/tmp"}))
+            .await;
+        assert!(r.is_ok());
+
+        let _ = tokio::time::timeout(Duration::from_secs(6), _server.shutdown()).await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        let msg = tokio::time::timeout(Duration::from_secs(5), reader.read_message()).await;
+        assert!(msg.unwrap().is_none());
+
+        let server2 = Arc::new(IpcServer::new(&path, make_config()).unwrap());
+        let srv2 = Arc::clone(&server2);
+        tokio::spawn(async move {
+            let _ = srv2.run().await;
+        });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let (client2, _reader2) = IpcClient::connect(&path).await.unwrap();
+        let r2 = client2
+            .send_request("create_session", serde_json::json!({"cwd": "/tmp"}))
+            .await;
+        assert!(r2.is_ok());
+    }
 }

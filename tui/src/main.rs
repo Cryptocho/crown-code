@@ -14,8 +14,9 @@ use std::time::Duration;
 use crate::app::App;
 use crate::app_event::{AppEvent, AppEventSender};
 use crate::event::TuiEvent;
-use crate::ipc::IpcClient;
+use crate::ipc::{IpcClient, IpcEventReader};
 use crate::tui::Tui;
+use crown_core::ipc::message::JsonRpcMessage;
 use crown_core::ipc::transport::resolve_socket_path;
 use tokio::sync::mpsc;
 
@@ -29,7 +30,7 @@ async fn main() -> anyhow::Result<()> {
             .map(|s| s.as_str()),
     );
 
-    let (ipc, mut ipc_reader) = match IpcClient::connect(&socket_path).await {
+    let (ipc, ipc_reader) = match IpcClient::connect(&socket_path).await {
         Ok(pair) => pair,
         Err(e) => {
             eprintln!("Failed to connect to crown-core daemon at {socket_path}: {e}");
@@ -72,6 +73,9 @@ async fn main() -> anyhow::Result<()> {
 
     let mut draw_interval = tokio::time::interval(Duration::from_millis(50));
 
+    let mut ipc = Some(ipc);
+    let mut ipc_reader = Some(ipc_reader);
+
     loop {
         tokio::select! {
             biased;
@@ -91,8 +95,14 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
 
-            Some(msg) = ipc_reader.read_message() => {
-                app.handle_ipc_message(msg);
+            msg = maybe_read_message(&mut ipc_reader) => {
+                if let Some(m) = msg {
+                    app.handle_ipc_message(m);
+                } else {
+                    ipc = None;
+                    ipc_reader = None;
+                    app.handle_app_event(AppEvent::IpcDisconnected);
+                }
             }
 
             Some(event) = app_event_rx.recv() => {
@@ -100,22 +110,65 @@ async fn main() -> anyhow::Result<()> {
                     AppEvent::UserMessageSent(text) => {
                         let text = text.clone();
                         app.handle_app_event(event);
-                        let _ = ipc.send_request(
-                            "user_message",
-                            serde_json::json!({
-                                "session_id": app.session_id.as_deref().unwrap_or(""),
-                                "content": text,
-                            }),
-                        ).await;
+                        if let Some(ref ipc) = ipc {
+                            let start = std::time::Instant::now();
+                            let _ = ipc.send_request(
+                                "user_message",
+                                serde_json::json!({
+                                    "session_id": app.session_id.as_deref().unwrap_or(""),
+                                    "content": text,
+                                }),
+                            ).await;
+                            let elapsed = start.elapsed().as_millis() as u64;
+                            app.api_latencies.push_back(elapsed);
+                            if app.api_latencies.len() > 5 {
+                                app.api_latencies.pop_front();
+                            }
+                        }
                     }
                     AppEvent::CancelRequested => {
                         app.handle_app_event(AppEvent::CancelRequested);
-                        let _ = ipc.send_request(
-                            "cancel",
-                            serde_json::json!({
-                                "session_id": app.session_id.as_deref().unwrap_or(""),
-                            }),
-                        ).await;
+                        if let Some(ref ipc) = ipc {
+                            let _ = ipc.send_request(
+                                "cancel",
+                                serde_json::json!({
+                                    "session_id": app.session_id.as_deref().unwrap_or(""),
+                                }),
+                            ).await;
+                        }
+                    }
+                    AppEvent::ReconnectRequested => {
+                        match IpcClient::connect(&socket_path).await {
+                            Ok((new_client, new_reader)) => {
+                                match new_client.send_request("create_session", serde_json::json!({
+                                    "cwd": std::env::current_dir()
+                                        .map(|p| p.to_string_lossy().to_string())
+                                        .unwrap_or_else(|_| ".".to_string()),
+                                })).await {
+                                    Ok(val) => {
+                                        let sid = val["session_id"]
+                                            .as_str()
+                                            .unwrap_or("sess_unknown")
+                                            .to_string();
+                                        ipc = Some(new_client);
+                                        ipc_reader = Some(new_reader);
+                                        app.handle_app_event(AppEvent::IpcReconnected {
+                                            session_id: sid,
+                                        });
+                                    }
+                                    Err(e) => {
+                                        app.handle_app_event(AppEvent::ReconnectFailed {
+                                            reason: format!("create_session failed: {e}"),
+                                        });
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                app.handle_app_event(AppEvent::ReconnectFailed {
+                                    reason: format!("{e}"),
+                                });
+                            }
+                        }
                     }
                     _ => {
                         app.handle_app_event(event);
@@ -138,12 +191,21 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    let _ = ipc
-        .send_notification(
-            "destroy_session",
-            serde_json::json!({"session_id": session_id}),
-        )
-        .await;
+    if let Some(ref ipc) = ipc {
+        let _ = ipc
+            .send_notification(
+                "destroy_session",
+                serde_json::json!({"session_id": session_id}),
+            )
+            .await;
+    }
     let _ = Tui::restore();
     Ok(())
+}
+
+async fn maybe_read_message(reader: &mut Option<IpcEventReader>) -> Option<JsonRpcMessage> {
+    match reader {
+        Some(r) => r.read_message().await,
+        None => std::future::pending().await,
+    }
 }

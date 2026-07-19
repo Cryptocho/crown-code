@@ -12,6 +12,7 @@ Compared to cline, this project aims to deliver:
 - **Workspace vector index**: build and query a vector index over the entire workspace for semantic search
 - **Accurate session cost stats**: include subagent calls in total cost tracking, not just top-level LLM requests
 - **Regenerate when stop**: regenerate llm response when error or user interrupt
+- 根据智能体提供的聚焦问题，对读取、搜索和 shell 工具的大型输出进行任务感知裁剪
 
 ## Project Structure
 
@@ -183,6 +184,16 @@ cargo clippy -p crown-tui
 # Additional tools available in dev shell:
 cargo add <dependency>                 # Add dependencies via cargo-edit
 ```
+
+### Testing Best Practices
+
+- **NEVER use `cargo test 2>&1 | tail -10`** — `tail` only shows the last test suite result, silently hiding failures in earlier suites when there are multiple crates. Use this instead:
+
+```bash
+cargo test 2>&1 | grep 'test result'
+```
+
+This prints **all** `test result:` lines across every test binary, so any failing suite is visible. The workspace currently has multiple test binaries (e.g. `crown-core` has unit tests + integration tests + doctests).
 
 ### Code Coverage
 

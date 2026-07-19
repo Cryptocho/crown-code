@@ -13,6 +13,7 @@ pub struct InputBarData<'a> {
     pub agent_mode: &'a AgentMode,
     pub textarea: &'a TextArea<'static>,
     pub focus: bool,
+    pub is_disconnected: bool,
 }
 
 pub fn render_input_bar(area: Rect, buf: &mut Buffer, data: &InputBarData) {
@@ -77,7 +78,11 @@ pub fn render_input_bar(area: Rect, buf: &mut Buffer, data: &InputBarData) {
     // Line 1: hint (only if height >= 2)
     if area.height >= 2 {
         let hint_line_y = area.y + 1;
-        let hint = "Enter 发送 · Ctrl+C 退出 · Tab 切换焦点 · Ctrl+P 切换模式";
+        let hint = if data.is_disconnected {
+            "r 重连 · Ctrl+C 退出"
+        } else {
+            "Enter 发送 · Ctrl+C 退出 · Tab 切换焦点 · Ctrl+P 切换模式"
+        };
         let hint_style = Style::default().fg(Color::DarkGray);
         buf.set_string(area.x, hint_line_y, hint, hint_style);
         let hint_width = UnicodeWidthStr::width(hint).min(width);
@@ -116,6 +121,7 @@ mod tests {
             agent_mode: &AgentMode::Code,
             textarea: &textarea,
             focus: true,
+            is_disconnected: false,
         };
         let area = Rect::new(0, 0, 80, 2);
         let mut buf = Buffer::empty(area);
@@ -138,6 +144,7 @@ mod tests {
             agent_mode: &AgentMode::Plan,
             textarea: &textarea,
             focus: false,
+            is_disconnected: false,
         };
         let area = Rect::new(0, 0, 80, 2);
         let mut buf = Buffer::empty(area);
@@ -155,6 +162,7 @@ mod tests {
             agent_mode: &AgentMode::Ask,
             textarea: &textarea,
             focus: false,
+            is_disconnected: false,
         };
         let area = Rect::new(0, 0, 80, 2);
         let mut buf = Buffer::empty(area);
@@ -171,6 +179,7 @@ mod tests {
             agent_mode: &AgentMode::Code,
             textarea: &textarea,
             focus: false,
+            is_disconnected: false,
         };
         // Height 1: only render input line, no hint line
         let area = Rect::new(0, 0, 80, 1);
@@ -180,5 +189,42 @@ mod tests {
         let area0 = Rect::new(0, 0, 80, 0);
         let mut buf0 = Buffer::empty(area0);
         render_input_bar(area0, &mut buf0, &data);
+    }
+
+    #[test]
+    fn test_input_bar_disconnected_hint() {
+        let textarea = TextArea::default();
+        let data = InputBarData {
+            model: "gpt-4o",
+            agent_mode: &AgentMode::Code,
+            textarea: &textarea,
+            focus: true,
+            is_disconnected: true,
+        };
+        let area = Rect::new(0, 0, 80, 2);
+        let mut buf = Buffer::empty(area);
+        render_input_bar(area, &mut buf, &data);
+        let line1 = line_content(&buf, area, 1);
+        assert!(line1.contains("r"));
+        assert!(line1.contains("Ctrl+C"));
+        assert!(!line1.contains("Enter"));
+    }
+
+    #[test]
+    fn test_input_bar_connected_hint() {
+        let textarea = TextArea::default();
+        let data = InputBarData {
+            model: "gpt-4o",
+            agent_mode: &AgentMode::Code,
+            textarea: &textarea,
+            focus: true,
+            is_disconnected: false,
+        };
+        let area = Rect::new(0, 0, 80, 2);
+        let mut buf = Buffer::empty(area);
+        render_input_bar(area, &mut buf, &data);
+        let line1 = line_content(&buf, area, 1);
+        assert!(line1.contains("Enter"));
+        assert!(line1.contains("Ctrl+C"));
     }
 }

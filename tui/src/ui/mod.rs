@@ -34,6 +34,7 @@ pub fn render(frame: &mut Frame, app: &App) {
         agent_mode: &app.agent_mode,
         textarea: &app.chat_widget.textarea,
         focus: app.focus == crate::app::FocusTarget::Input,
+        is_disconnected: app.is_disconnected(),
     };
     input::render_input_bar(chunks[2], buf, &input_data);
 }
@@ -74,6 +75,7 @@ mod tests {
             agent_mode: &app.agent_mode,
             textarea: &app.chat_widget.textarea,
             focus: true,
+            is_disconnected: false,
         };
         input::render_input_bar(chunks[2], &mut buf, &input_data);
     }
@@ -102,6 +104,7 @@ mod tests {
             agent_mode: &app.agent_mode,
             textarea: &app.chat_widget.textarea,
             focus: false,
+            is_disconnected: false,
         };
         input::render_input_bar(chunks[2], &mut buf, &input_data);
     }

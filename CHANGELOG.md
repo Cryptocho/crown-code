@@ -1,5 +1,23 @@
 # Changelog
 
+## IPC 断连检测与重连
+
+### Added
+- `tui/src/app_event.rs`：新增 4 个事件变体 — `IpcDisconnected`、`ReconnectRequested`、`IpcReconnected { session_id }`、`ReconnectFailed { reason }`
+- `tui/src/app.rs`：`SessionStatus` 新增 `Disconnected` 变体；`App` 新增 `disconnect_reason: Option<String>` 字段；新增 `is_disconnected()` 方法；`handle_key()` 开头增加 r 键断连拦截（仅 Disconnected 状态触发 `ReconnectRequested`）；`SubmitMessage`/`Cancel` 在断连状态下被拦截；`handle_app_event()` 新增 4 个事件分支：`IpcDisconnected`（结束流式 + 标记 Running tool 为 Error + 推送 SystemMessageCell）、`IpcReconnected`（恢复 Active 状态）、`ReconnectFailed`（推送 ErrorCell）
+- `tui/src/main.rs`：`ipc`/`ipc_reader` 改为 `Option<>`；新增 `maybe_read_message()` 辅助函数（`None` 时返回 `std::future::pending()` 禁用 IPC 分支）；IPC 分支收到 `None` 时设置 `ipc=None` 并发送 `IpcDisconnected`；新增 `ReconnectRequested` 事件处理（连接 + create_session + 发送 `IpcReconnected` 或 `ReconnectFailed`）；`UserMessageSent`/`CancelRequested` 增加 `if let Some(ref ipc)` 连接检查；退出清理适配 Option
+- `tui/src/ui/status.rs`：`SessionStatus::Disconnected` → `●` 红色
+- `tui/src/ui/input.rs`：`InputBarData` 新增 `is_disconnected: bool`；断连时提示行变为 `r 重连 · Ctrl+C 退出`
+- `tui/src/ui/mod.rs`：构造 `InputBarData` 时传入 `is_disconnected: app.is_disconnected()`
+- 单元测试：app.rs 11 个新测试（断连状态/流式中断/Running tool 标记/重连清除/重连失败/提交拦截/Cancel 拦截/r 键触发/r 键透传/断连退出）、input.rs 2 个（断连提示/正常提示）、status.rs 1 个（Disconnected 颜色）、ipc.rs 1 个集成测试（断连 + 重启 server + 重连）
+
+### Architecture
+- 断连后 `ipc`/`ipc_reader` 设为 `None`，`tokio::select!` 的 IPC 分支通过 `std::future::pending()` 自动禁用，不占用 CPU
+- 重连创建新 session，旧聊天历史保留在 UI 中
+- r 键拦截在 `App::handle_key()` 开头完成，keymap 无需改动
+
+- Affected files: `tui/src/app_event.rs`, `tui/src/app.rs`, `tui/src/main.rs`, `tui/src/ui/status.rs`, `tui/src/ui/input.rs`, `tui/src/ui/mod.rs`, `tui/src/ipc.rs`
+
 ## App 状态机重构：handle_key/handle_paste/handle_ipc_message + tool cursor
 
 ### Added

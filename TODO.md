@@ -807,10 +807,10 @@ async fn main() -> anyhow::Result<()> {
 }
 ```
 
-- [ ] CLI 参数解析：`--socket-path` 覆盖默认 socket 路径（复用 core 的 `resolve_socket_path`）
-- [ ] 初始化顺序：IPC connect → create_session → Tui::init → App::new → 进入事件循环（IPC 连接失败时可直接打印错误退出，不进入 raw mode）
-- [ ] 初始化失败处理：IPC 连接超时/拒绝时打印错误信息并退出；TUI 初始化失败时清理 IPC 连接
-- [ ] 验证：`cargo build -p crown-tui` 编译通过
+- [x] CLI 参数解析：`--socket-path` 覆盖默认 socket 路径（复用 core 的 `resolve_socket_path`）
+- [x] 初始化顺序：IPC connect → create_session → Tui::init → App::new → 进入事件循环（IPC 连接失败时可直接打印错误退出，不进入 raw mode）
+- [x] 初始化失败处理：IPC 连接超时/拒绝时打印错误信息并退出；TUI 初始化失败时清理 IPC 连接
+- [x] 验证：`cargo build -p crown-tui` 编译通过
 
 #### 1.7.2 事件路由与分发：三路事件源接入
 
@@ -848,10 +848,10 @@ loop {
 }
 ```
 
-- [ ] 终端事件 → `app.handle_key()` / `app.handle_paste()` / `app.request_redraw()`
-- [ ] IPC 消息 → `app.handle_ipc_message()`：解析 JSON-RPC → 转换为 AppEvent → 发送到 app_event_tx
-- [ ] 内部事件 → `app.handle_app_event()`：更新 ChatWidget / SessionStatus / token 统计
-- [ ] IPC 断连处理：`ipc.read_message()` 返回 `None` 时设置 `SessionStatus::Error`，提示用户重连或退出
+- [x] 终端事件 → `app.handle_key()` / `app.handle_paste()` / `app.request_redraw()`
+- [x] IPC 消息 → `app.handle_ipc_message()`：解析 JSON-RPC → 转换为 AppEvent → 发送到 app_event_tx
+- [x] 内部事件 → `app.handle_app_event()`：更新 ChatWidget / SessionStatus / token 统计
+- [x] IPC 断连处理：`ipc.read_message()` 返回 `None` 时设置 `SessionStatus::Disconnected`，提示用户按 r 重连
 - [ ] 验证：启动 core daemon + TUI → 输入消息 → 看到事件在三路之间正确流转
 
 #### 1.7.3 帧率控制与渲染：needs_redraw + interval 调度
@@ -869,22 +869,22 @@ _ = draw_interval.tick() => {
 }
 ```
 
-- [ ] `tokio::time::interval(50ms)` 调度重绘（20fps 上限）
-- [ ] `needs_redraw` 标志：仅在状态变化时（收到 IPC 消息、用户输入、resize）设置为 true
-- [ ] `tui.draw()` 调用 `ui::render(frame, &app)` 完成实际渲染
-- [ ] 空闲时 `needs_redraw = false` → 跳过渲染 → CPU 不空转
+- [x] `tokio::time::interval(50ms)` 调度重绘（20fps 上限）
+- [x] `needs_redraw` 标志：仅在状态变化时（收到 IPC 消息、用户输入、resize）设置为 true
+- [x] `tui.draw()` 调用 `ui::render(frame, &app)` 完成实际渲染
+- [x] 空闲时 `needs_redraw = false` → 跳过渲染 → CPU 不空转
 - [ ] 验证：空闲时 CPU 占用接近 0%，流式输出时 UI 刷新流畅无卡顿
 
 #### 1.7.4 优雅退出与错误恢复
 
 > 目标：各种退出/异常场景下终端状态正确恢复，不留下脏终端
 
-- [ ] **正常退出**：Ctrl+C / Ctrl+D → `AppEvent::Quit` → `should_quit = true` → 退出循环 → `leave_alt_screen` + `restore` + 发送 `destroy_session`
-- [ ] **panic 恢复**：设置 `std::panic::set_hook`，panic 时执行 `Tui::restore()` 恢复终端（避免终端卡在 raw mode）
-- [ ] **IPC 断连恢复**：
-  - 检测到断连 → 设置 `SessionStatus::Error` → UI 显示错误提示
-  - 用户按 `R` 键 → 尝试重连（3 次，间隔 1s/2s/4s）→ 成功则恢复 `SessionStatus::Active`
-  - 重连失败 → 提示用户重启 core daemon，可选择退出
+- [x] **正常退出**：Ctrl+C / Ctrl+D → `AppEvent::Quit` → `should_quit = true` → 退出循环 → `leave_alt_screen` + `restore` + 发送 `destroy_session`
+- [x] **panic 恢复**：设置 `std::panic::set_hook`，panic 时执行 `Tui::restore()` 恢复终端（避免终端卡在 raw mode）
+- [x] **IPC 断连恢复**：
+  - 检测到断连 → 设置 `SessionStatus::Disconnected` → UI 显示错误提示
+  - 用户按 `r` 键 → 尝试重连（创建新 session）→ 成功则恢复 `SessionStatus::Active`
+  - 重连失败 → 提示用户重启 core daemon，可重复按 r 重试
 - [ ] **信号处理**：SIGTERM / SIGINT（Windows: Ctrl+C）触发优雅退出流程
 - [ ] **Session 恢复**：TUI 重新连接后可选择新建 session 或恢复已有 session（通过 `list_sessions` 查询）
 - [ ] 验证：

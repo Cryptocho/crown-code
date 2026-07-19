@@ -39,6 +39,7 @@ pub fn render_status_bar(area: Rect, buf: &mut Buffer, data: &StatusBarData) {
         SessionStatus::Active => ("●", Color::Green),
         SessionStatus::Completed => ("●", Color::Blue),
         SessionStatus::Error => ("●", Color::Red),
+        SessionStatus::Disconnected => ("●", Color::Red),
     };
     let tokens = format!(
         "In:{} Out:{} Cache:{}",
@@ -302,6 +303,7 @@ mod tests {
             (SessionStatus::Active, Color::Green),
             (SessionStatus::Completed, Color::Blue),
             (SessionStatus::Error, Color::Red),
+            (SessionStatus::Disconnected, Color::Red),
         ] {
             let area = Rect::new(0, 0, 80, 1);
             let mut buf = Buffer::empty(area);

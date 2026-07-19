@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use crate::app_event::{AppEvent, AppEventSender};
 use crate::chatwidget::ChatWidget;
 use crate::keymap::{self, KeyAction};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use crown_core::ipc::message::JsonRpcMessage;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -11,6 +11,7 @@ pub enum SessionStatus {
     Active,
     Completed,
     Error,
+    Disconnected,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -59,6 +60,7 @@ pub struct App {
     pub cache_read_tokens: i32,
     pub model: String,
     pub api_latencies: VecDeque<u64>,
+    pub disconnect_reason: Option<String>,
 }
 
 impl App {
@@ -78,6 +80,7 @@ impl App {
             cache_read_tokens: 0,
             model: String::new(),
             api_latencies: VecDeque::with_capacity(5),
+            disconnect_reason: None,
         }
     }
 
@@ -89,7 +92,21 @@ impl App {
         }
     }
 
+    pub fn is_disconnected(&self) -> bool {
+        self.status == SessionStatus::Disconnected
+    }
+
     pub fn handle_key(&mut self, key: KeyEvent) {
+        if self.is_disconnected()
+            && key.kind == KeyEventKind::Press
+            && key.code == KeyCode::Char('r')
+            && key.modifiers == KeyModifiers::NONE
+        {
+            self.app_event_tx.send(AppEvent::ReconnectRequested);
+            self.needs_redraw = true;
+            return;
+        }
+
         let action = if self.focus == FocusTarget::Input {
             keymap::map_input_key(key)
         } else {
@@ -99,6 +116,7 @@ impl App {
             KeyAction::Quit => {
                 self.app_event_tx.send(AppEvent::Quit);
             }
+            KeyAction::Cancel if self.is_disconnected() => {}
             KeyAction::Cancel => {
                 self.app_event_tx.send(AppEvent::CancelRequested);
             }
@@ -106,6 +124,7 @@ impl App {
                 self.agent_mode = self.agent_mode.cycle();
                 self.needs_redraw = true;
             }
+            KeyAction::SubmitMessage if self.is_disconnected() => {}
             KeyAction::SubmitMessage => {
                 let msg = self.chat_widget.take_input();
                 if !msg.trim().is_empty() {
@@ -224,6 +243,7 @@ impl App {
         match event {
             AppEvent::UserMessageSent(text) => {
                 use crate::history_cell::UserMessageCell;
+                self.chat_widget.finish_streaming();
                 self.chat_widget
                     .push_cell(Box::new(UserMessageCell { content: text }));
                 self.needs_redraw = true;
@@ -295,6 +315,46 @@ impl App {
             }
             AppEvent::SessionNameUpdate { name } => {
                 self.session_name = Some(name);
+                self.needs_redraw = true;
+            }
+            AppEvent::IpcDisconnected => {
+                self.chat_widget.finish_streaming();
+                use crate::history_cell::ToolCallStatus;
+                for cell in &mut self.chat_widget.cells {
+                    if let Some(tc) = cell.as_tool_call_mut()
+                        && tc.status == ToolCallStatus::Running
+                    {
+                        tc.status = ToolCallStatus::Error;
+                        tc.output = Some("Connection lost".to_string());
+                    }
+                }
+                use crate::history_cell::SystemMessageCell;
+                self.chat_widget.push_cell(Box::new(SystemMessageCell {
+                    content: "Core daemon disconnected. Press R to reconnect.".to_string(),
+                }));
+                self.status = SessionStatus::Disconnected;
+                self.disconnect_reason = Some("Core daemon disconnected".to_string());
+                self.needs_redraw = true;
+            }
+            AppEvent::ReconnectRequested => {}
+            AppEvent::IpcReconnected { session_id } => {
+                self.session_id = Some(session_id);
+                self.session_name = None;
+                self.status = SessionStatus::Active;
+                self.disconnect_reason = None;
+                use crate::history_cell::SystemMessageCell;
+                self.chat_widget.push_cell(Box::new(SystemMessageCell {
+                    content: "Reconnected to core daemon.".to_string(),
+                }));
+                self.needs_redraw = true;
+            }
+            AppEvent::ReconnectFailed { reason } => {
+                use crate::history_cell::ErrorCell;
+                self.chat_widget
+                    .push_cell(Box::new(ErrorCell {
+                        code: 0,
+                        message: format!("Reconnect failed: {reason}"),
+                    }));
                 self.needs_redraw = true;
             }
         }
@@ -844,5 +904,151 @@ mod tests {
         app.handle_ipc_message(msg);
         assert!(app.chat_widget.active_cell.is_some());
         assert!(app.needs_redraw);
+    }
+
+    #[test]
+    fn test_is_disconnected_initially_false() {
+        let app = make_test_app();
+        assert!(!app.is_disconnected());
+        assert_ne!(app.status, SessionStatus::Disconnected);
+    }
+
+    #[test]
+    fn test_handle_ipc_disconnect_sets_disconnected() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mut app = App::new("test".into(), AppEventSender::new(tx));
+        app.handle_app_event(AppEvent::IpcDisconnected);
+        assert_eq!(app.status, SessionStatus::Disconnected);
+        assert_eq!(
+            app.disconnect_reason,
+            Some("Core daemon disconnected".to_string())
+        );
+        assert!(app.needs_redraw);
+    }
+
+    #[test]
+    fn test_handle_ipc_disconnect_finishes_streaming() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mut app = App::new("test".into(), AppEventSender::new(tx));
+        app.handle_app_event(AppEvent::AssistantDelta {
+            delta: "partial text".into(),
+        });
+        assert!(app.chat_widget.active_cell.is_some());
+        app.handle_app_event(AppEvent::IpcDisconnected);
+        assert!(app.chat_widget.active_cell.is_none());
+    }
+
+    #[test]
+    fn test_handle_ipc_disconnect_marks_running_tools_error() {
+        use crate::history_cell::ToolCallStatus;
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mut app = App::new("test".into(), AppEventSender::new(tx));
+        app.chat_widget
+            .start_tool_call("c1", "read_file", "{}");
+        app.handle_app_event(AppEvent::IpcDisconnected);
+        let tc = app.chat_widget.cells[0].as_tool_call().unwrap();
+        assert_eq!(tc.status, ToolCallStatus::Error);
+        assert_eq!(tc.output.as_deref(), Some("Connection lost"));
+    }
+
+    #[test]
+    fn test_handle_reconnect_clears_disconnect() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mut app = App::new("old_id".into(), AppEventSender::new(tx));
+        app.handle_app_event(AppEvent::IpcDisconnected);
+        assert!(app.is_disconnected());
+        app.handle_app_event(AppEvent::IpcReconnected {
+            session_id: "new_id".into(),
+        });
+        assert!(!app.is_disconnected());
+        assert_eq!(app.status, SessionStatus::Active);
+        assert_eq!(app.session_id, Some("new_id".into()));
+        assert!(app.disconnect_reason.is_none());
+    }
+
+    #[test]
+    fn test_handle_reconnect_failed_shows_error() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mut app = App::new("test".into(), AppEventSender::new(tx));
+        app.handle_app_event(AppEvent::IpcDisconnected);
+        app.handle_app_event(AppEvent::ReconnectFailed {
+            reason: "connection refused".into(),
+        });
+        assert!(app.is_disconnected());
+        assert!(app
+            .chat_widget
+            .cells
+            .iter()
+            .any(|c| {
+                let lines = c.display_lines(80);
+                let text = format!("{lines:?}");
+                text.contains("Reconnect failed") && text.contains("connection refused")
+            }));
+    }
+
+    #[test]
+    fn test_submit_blocked_when_disconnected() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut app = App::new("test".into(), AppEventSender::new(tx));
+        app.handle_app_event(AppEvent::IpcDisconnected);
+        app.chat_widget.textarea.insert_str("hello");
+        app.handle_key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Enter,
+            crossterm::event::KeyModifiers::NONE,
+        ));
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn test_cancel_blocked_when_disconnected() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut app = App::new("test".into(), AppEventSender::new(tx));
+        app.handle_app_event(AppEvent::IpcDisconnected);
+        app.handle_key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('x'),
+            crossterm::event::KeyModifiers::CONTROL,
+        ));
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn test_r_key_triggers_reconnect_when_disconnected() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut app = App::new("test".into(), AppEventSender::new(tx));
+        app.handle_app_event(AppEvent::IpcDisconnected);
+        app.handle_key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('r'),
+            crossterm::event::KeyModifiers::NONE,
+        ));
+        let event = rx.try_recv().unwrap();
+        assert!(matches!(event, AppEvent::ReconnectRequested));
+        assert!(app.needs_redraw);
+    }
+
+    #[test]
+    fn test_r_key_passthrough_when_connected() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut app = App::new("test".into(), AppEventSender::new(tx));
+        app.focus = FocusTarget::Input;
+        app.handle_key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('r'),
+            crossterm::event::KeyModifiers::NONE,
+        ));
+        assert!(rx.try_recv().is_err());
+        let lines = app.chat_widget.textarea.lines();
+        assert!(lines.iter().any(|l| l.contains('r')));
+    }
+
+    #[test]
+    fn test_quit_still_works_when_disconnected() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut app = App::new("test".into(), AppEventSender::new(tx));
+        app.handle_app_event(AppEvent::IpcDisconnected);
+        app.handle_key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('c'),
+            crossterm::event::KeyModifiers::CONTROL,
+        ));
+        let event = rx.try_recv().unwrap();
+        assert!(matches!(event, AppEvent::Quit));
     }
 }
