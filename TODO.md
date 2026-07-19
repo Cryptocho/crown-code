@@ -465,7 +465,7 @@ impl Tui {
 - 顶部固定 1 行，信息按优先级从左到右排列，根据终端宽度自适应裁剪
 - 优先级 1：session 名称（由模型根据用户首次输入自动生成，如"我的第一个项目"）
 - 优先级 2：token 用量（`In:{input} Out:{output} Cache R:{cache_read}`）
-- 优先级 3：API 平均延迟（`avg:{ms}ms`，取最近 5 次请求平均值）
+- 优先级 3：API 平均延迟（`avg:{ms}ms`，取最近 5 次请求平均值）和 tps(token/s)显示
 - 优先级 4：session 活动状态指示灯（`●`(green)=active/running，`●`(blue)=completed/finished，`●`(red)=error）
 - 终端宽度不足时，按优先级从低到高隐藏信息
 
@@ -900,7 +900,6 @@ _ = draw_interval.tick() => {
 - [ ] **Multi-session**：终端 B 和终端 C 同时运行 `crown-tui`，连接同一个 core daemon，session 完全隔离
 - [ ] **取消任务**：TUI 按 Ctrl+X 取消正在执行的任务
 - [ ] **断线恢复**：TUI 异常退出 → 重新连接 → session 可恢复或新建
-- [ ] **Daemon 退出**：所有 TUI 断开后 core 自动退出（或保持运行等待新连接）
 - [ ] **性能验证**：流式文本延迟 < 50ms，UI 刷新 20fps 无卡顿
 
 ---
