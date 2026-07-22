@@ -16,6 +16,10 @@ anyhow = "1"
 tui-textarea = "0.7"
 futures-util = "0.3"
 unicode-width = "0.1"
+pulldown-cmark = "0.10"
+textwrap = "0.16"
+syntect = "5"
+two-face = { version = "0.5", default-features = false, features = ["syntect-default-onig"] }
 
 [dev-dependencies]
 nanoid = "0.4"

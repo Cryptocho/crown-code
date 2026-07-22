@@ -33,7 +33,6 @@ All tools are defined in `src/shared/tools.ts` (`ClineDefaultTool` enum) with ha
 | Tool ID | Handler File | Description |
 |---------|--------------|-------------|
 | `ask_followup_question` | `AskFollowupQuestionToolHandler.ts` | Ask user a followup question |
-| `attempt_completion` | `AttemptCompletionHandler.ts` | Attempt to complete a task |
 | `execute_command` | `ExecuteCommandToolHandler.ts` | Execute bash commands |
 | `replace_in_file` | `WriteToFileToolHandler.ts` | Edit existing files |
 | `read_file` | `ReadFileToolHandler.ts` | Read file contents |

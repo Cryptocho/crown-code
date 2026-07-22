@@ -3,7 +3,7 @@ use std::time::Instant;
 use tui_textarea::TextArea;
 
 use crate::history_cell::{
-    AssistantMessageCell, HistoryCell, ToolCallCell, ToolCallStatus, UserMessageCell,
+    AgentMarkdownCell, HistoryCell, ToolCallCell, ToolCallStatus, UserMessageCell,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -45,7 +45,7 @@ impl ChatWidget {
     }
 
     pub fn start_streaming(&mut self) {
-        self.active_cell = Some(Box::new(AssistantMessageCell::new_streaming()));
+        self.active_cell = Some(Box::new(AgentMarkdownCell::new_streaming()));
     }
 
     pub fn append_streaming(&mut self, delta: &str) {
@@ -374,7 +374,8 @@ mod tests {
         assert_eq!(w.total_rendered_lines(80), 1);
 
         w.start_streaming();
-        assert_eq!(w.total_rendered_lines(80), 2);
+        // AgentMarkdownCell has prefix "[Assistant] " + content line
+        assert_eq!(w.total_rendered_lines(80), 3);
     }
 
     #[test]

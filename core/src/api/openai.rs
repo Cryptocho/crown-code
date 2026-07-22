@@ -965,9 +965,9 @@ mod tests {
         let mut client = new_client(ApiClientConfig {
             base_url: "https://openrouter.ai/api/v1/chat/completions".to_string(),
             api_key,
-            model: "meta-llama/llama-3.1-8b-instruct".to_string(),
+            model: "xiaomi/mimo-v2.5".to_string(),
             temperature: 0.0,
-            max_tokens: 20,
+            max_tokens: 4096,
             stream_options: None,
         });
         let resp = create_message(
@@ -998,9 +998,9 @@ mod tests {
         let mut client = new_client(ApiClientConfig {
             base_url: "https://openrouter.ai/api/v1/chat/completions".to_string(),
             api_key,
-            model: "meta-llama/llama-3.1-8b-instruct".to_string(),
+            model: "xiaomi/mimo-v2.5".to_string(),
             temperature: 0.0,
-            max_tokens: 20,
+            max_tokens: 4096,
             stream_options: None,
         });
         let tools = vec![Tool {
@@ -1041,9 +1041,9 @@ mod tests {
         let mut client = new_client(ApiClientConfig {
             base_url: "https://openrouter.ai/api/v1/chat/completions".to_string(),
             api_key,
-            model: "meta-llama/llama-3.1-8b-instruct".to_string(),
+            model: "xiaomi/mimo-v2.5".to_string(),
             temperature: 0.0,
-            max_tokens: 20,
+            max_tokens: 4096,
             stream_options: None,
         });
         let mut received_text = String::new();
@@ -1087,9 +1087,9 @@ mod tests {
         let mut client = new_client(ApiClientConfig {
             base_url: "https://openrouter.ai/api/v1/chat/completions".to_string(),
             api_key,
-            model: "meta-llama/llama-3.1-8b-instruct".to_string(),
+            model: "xiaomi/mimo-v2.5".to_string(),
             temperature: 0.0,
-            max_tokens: 20,
+            max_tokens: 4096,
             stream_options: None,
         });
         let tools = vec![Tool {

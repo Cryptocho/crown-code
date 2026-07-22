@@ -1,5 +1,49 @@
 # Changelog
 
+## Markdown 渲染 + attempt_completion 移除 + MCP 改进
+
+### Added
+- `tui/src/markdown_render.rs`：基于 `pulldown-cmark` + `syntect` 的 Markdown 渲染引擎，支持标题/粗体/斜体/代码块/列表/链接/引用/表格样式映射、代码块语法高亮（syntect）、OSC 8 超链接
+- `tui/src/history_cell.rs`：新增 `AgentMarkdownCell`（替代 `AssistantMessageCell` 用于流式渲染），支持 markdown 渲染 + 流式光标（`▌`）
+- `tui/src/chatwidget.rs`：`start_streaming()` 改用 `AgentMarkdownCell::new_streaming()`
+- `tui/src/ui/streaming.rs`：`StreamingRenderer` 改用 `render_markdown()`，使用 `buf.set_line` 逐行渲染替代 `Paragraph` + `Wrap`
+- `tui/Cargo.toml`：新增依赖 `pulldown-cmark = "0.10"`, `textwrap = "0.16"`, `syntect = "5"`, `two-face`
+- `core/src/mcp/transport_http.rs`：新增 `Content-Type: application/json` header；`post_json_stream` 错误处理改进：提取 JSON error body 中的 `error.message`，返回真实 HTTP 状态码；新增 wiremock 集成测试（12 个测试用例）
+- `core/Cargo.toml`：`dev-dependencies` 新增 `wiremock = "0.6"`
+
+### Refactored
+- `core/src/agent/tools.rs`：移除 `attempt_completion` 工具定义和执行逻辑，工具数从 7 减少到 6
+- `core/src/agent/loop.rs`：移除 `on_task_done` 回调，移除 `attempt_completion` 工具的检测逻辑，循环终止条件改为 `cancelled` flag
+- `core/src/agent/prompt.rs`：系统提示词中移除 `attempt_completion` 工具说明
+- `core/src/ipc/message.rs`：移除 `METHOD_TASK_DONE` 常量
+- `core/src/ipc/session_manager.rs`：移除 `on_task_done` 实现
+- `core/src/main.rs`：API 配置从本地 Ollama 切换到 OpenRouter（`xiaomi/mimo-v2.5`），支持 `OPENROUTER_API_KEY` 环境变量
+- `core/src/api/openai.rs`：测试用例切换到 `xiaomi/mimo-v2.5` + `max_tokens: 4096`
+- `tui/src/history_cell.rs`：`UserMessageCell`/`AssistantMessageCell`/`ToolCallCell`/`SystemMessageCell`/`ErrorCell` 的 `desired_height` 改用 `UnicodeWidthChar` 宽度计算；`wrap_text_to_lines` 改用显示宽度而非字符数分割
+
+### Architecture
+- Markdown 渲染引擎支持流式增量渲染：`AgentMarkdownCell` 在 streaming 时追加 `▌` 光标，`finish_streaming()` 后移除
+- `Content-Type: application/json` 确保 HTTP transport 兼容更多 OpenAI-compatible API
+
+- Affected files: `tui/src/markdown_render.rs`, `tui/src/history_cell.rs`, `tui/src/chatwidget.rs`, `tui/src/ui/streaming.rs`, `tui/src/chat.rs`, `tui/Cargo.toml`, `core/src/agent/loop.rs`, `core/src/agent/prompt.rs`, `core/src/agent/tools.rs`, `core/src/ipc/message.rs`, `core/src/ipc/session_manager.rs`, `core/src/main.rs`, `core/src/api/openai.rs`, `core/src/mcp/transport_http.rs`, `core/Cargo.toml`
+
+## Chat Panel 滚动条 + 鼠标滚轮支持
+
+### Added
+- `tui/src/ui/chat.rs`：内容区域宽度改为 `area.width - 1`（始终预留 1 列给滚动条）；当 `total_lines > visible_height` 时使用 ratatui `Scrollbar` + `ScrollbarState` + `ScrollbarOrientation::VerticalRight` 渲染垂直滚动条；`area.width < 2` 时回退到全部宽度（无空间给滚动条）；新增 3 个测试（滚动条溢出渲染/内容不溢出时滚动条留白/窄宽度回退）
+- `tui/src/event.rs`：`TuiEvent` 新增 `Mouse(MouseEvent)` variant
+- `tui/src/tui.rs`：`init()`/`restore()`/`enter_alt_screen()`/`leave_alt_screen()` 添加 `EnableMouseCapture`/`DisableMouseCapture`；事件循环 `Event::Mouse(m)` 转发为 `TuiEvent::Mouse(m)`
+- `tui/src/keymap.rs`：新增 `map_mouse_event(MouseEvent) -> KeyAction` 函数，`ScrollUp`/`ScrollDown` 映射为 `ScrollUp(3)`/`ScrollDown(3)`，其余返回 `None`；新增 3 个测试
+- `tui/src/app.rs`：新增 `handle_mouse(MouseEvent)` 方法，将鼠标事件映射为 KeyAction 后执行滚动
+- `tui/src/main.rs`：`tokio::select!` 事件循环添加 `TuiEvent::Mouse(mouse)` 分支，调用 `app.handle_mouse(mouse)`
+
+### Architecture
+- ScrollbarState 每帧重建，避免改函数签名（`&ChatWidget` → `&mut`），创建成本极低
+- 鼠标滚轮作用域始终为 chat panel，不依赖焦点状态
+- EnableMouseCapture 代价是终端原生文本选择失效（标准 TUI 取舍）
+
+- Affected files: `tui/src/ui/chat.rs`, `tui/src/event.rs`, `tui/src/tui.rs`, `tui/src/keymap.rs`, `tui/src/app.rs`, `tui/src/main.rs`
+
 ## IPC 断连检测与重连
 
 ### Added
@@ -181,7 +225,7 @@
 ## Agent Loop 核心模块
 
 ### Added
-- `core/src/agent/tools.rs`：工具定义与执行调度模块（Rust 重写）。7 个工具（read_file/write_to_file/replace_in_file/execute_command/search_files/list_files/attempt_completion），OpenAI function calling JSON Schema 格式（`serde_json::json!` 宏）。公共 API：`get_tool_definitions() -> Vec<Tool>`（返回 7 个 Tool 定义，每个含 name/description/parameters）、`execute_tool(name: &str, args: &Value) -> String`（按名称 match 分发执行，attempt_completion 返回 `[COMPLETION]` 前缀标记）。错误处理：必需参数缺失返回 `"Error: ..."`，底层模块异常通过 error enum 转换为可读消息。输出格式：execute_command（`STDOUT:\n`/`STDERR:\n`/Exit code/abnormal exit/execution time）、list_files（`  ` 前缀 + `entries` 计数 + truncation 标记）、search_files（结果 + matches found 计数）
+- `core/src/agent/tools.rs`：工具定义与执行调度模块（Rust 重写）。6 个工具（read_file/write_to_file/replace_in_file/execute_command/search_files/list_files），OpenAI function calling JSON Schema 格式（`serde_json::json!` 宏）。公共 API：`get_tool_definitions() -> Vec<Tool>`（返回 6 个 Tool 定义，每个含 name/description/parameters）、`execute_tool(name: &str, args: &Value) -> String`（按名称 match 分发执行）。错误处理：必需参数缺失返回 `"Error: ..."`，底层模块异常通过 error enum 转换为可读消息。输出格式：execute_command（`STDOUT:\n`/`STDERR:\n`/Exit code/abnormal exit/execution time）、list_files（`  ` 前缀 + `entries` 计数 + truncation 标记）、search_files（结果 + matches found 计数）
 - `core/src/agent/prompt.rs`：System prompt 构建模块（Rust 重写）。公共 API：`build_system_prompt(cwd: &str) -> String`（生成包含角色描述、TOOL USE、AVAILABLE TOOLS 列表、RULES、SYSTEM INFORMATION 五个 section 的完整 prompt）。复用 `crate::shell_detect::detect_shells()` 检测默认 shell，使用 `std::env::consts::OS` 检测操作系统
 - `core/src/agent/loop.rs`：Agent Loop 核心调度模块（Rust 重写）。公共 API：`run_agent_loop(config: ApiClientConfig)`（双层 while 循环：外层读取 stdin 用户输入，内层流式 API 调用→工具执行→结果反馈）。流式回调使用闭包 `impl FnMut(ApiStreamChunk) -> bool`，`use std::io::Write` 用于 `stdout.flush()`。支持 `[TOOL_CALL]`/`[TOOL_RESULT]`/`[PROMPT]` stderr 日志。JSON 解析失败处理：`serde_json::from_str` 捕获无效参数，记录错误到 history 并 `continue` 跳过执行
 - `core/src/agent/mod.rs`：模块导出 `pub mod tools; pub mod prompt; pub mod r#loop;`（`r#loop` raw identifier 避免 Rust 关键字冲突）

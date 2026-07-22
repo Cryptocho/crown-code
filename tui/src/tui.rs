@@ -1,7 +1,10 @@
 use std::io::{self, Stdout};
 
 use crossterm::{
-    event::{DisableBracketedPaste, EnableBracketedPaste, Event, EventStream},
+    event::{
+        DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+        Event, EventStream,
+    },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -24,7 +27,12 @@ impl Tui {
     pub fn init() -> anyhow::Result<Self> {
         crossterm::terminal::enable_raw_mode()?;
         let mut stdout = io::stdout();
-        execute!(stdout, EnterAlternateScreen, EnableBracketedPaste)?;
+        execute!(
+            stdout,
+            EnterAlternateScreen,
+            EnableBracketedPaste,
+            EnableMouseCapture
+        )?;
         let backend = CrosstermBackend::new(stdout);
         let terminal = Terminal::new(backend)?;
 
@@ -39,6 +47,7 @@ impl Tui {
                         let tui_event = match event {
                             Event::Key(key) => Some(TuiEvent::Key(key)),
                             Event::Paste(text) => Some(TuiEvent::Paste(text)),
+                            Event::Mouse(m) => Some(TuiEvent::Mouse(m)),
                             Event::Resize(_, _) => Some(TuiEvent::Resize),
                             _ => None,
                         };
@@ -64,7 +73,12 @@ impl Tui {
     pub fn restore() -> anyhow::Result<()> {
         crossterm::terminal::disable_raw_mode()?;
         let mut stdout = io::stdout();
-        execute!(stdout, LeaveAlternateScreen, DisableBracketedPaste)?;
+        execute!(
+            stdout,
+            LeaveAlternateScreen,
+            DisableBracketedPaste,
+            DisableMouseCapture
+        )?;
         Ok(())
     }
 
@@ -72,7 +86,8 @@ impl Tui {
         execute!(
             self.terminal.backend_mut(),
             EnterAlternateScreen,
-            EnableBracketedPaste
+            EnableBracketedPaste,
+            EnableMouseCapture
         )?;
         Ok(())
     }
@@ -81,7 +96,8 @@ impl Tui {
         execute!(
             self.terminal.backend_mut(),
             LeaveAlternateScreen,
-            DisableBracketedPaste
+            DisableBracketedPaste,
+            DisableMouseCapture
         )?;
         Ok(())
     }

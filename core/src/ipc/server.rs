@@ -243,7 +243,7 @@ async fn dispatch_request(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ipc::message::{METHOD_ASSISTANT_TEXT, METHOD_TASK_DONE, make_request};
+    use crate::ipc::message::make_request;
     use interprocess::local_socket::ToFsName;
     use interprocess::local_socket::traits::tokio::Stream as StreamTrait;
 
@@ -296,10 +296,25 @@ mod tests {
     }
 
     fn make_config() -> ApiClientConfig {
+        // // Local Ollama configuration
+        // ApiClientConfig {
+        //     base_url: "http://localhost:11434/v1".to_string(),
+        //     api_key: String::new(),
+        //     model: "gemma4:e4b".to_string(),
+        //     temperature: 0.0,
+        //     max_tokens: 4096,
+        //     stream_options: None,
+        // }
+
+        // OpenRouter configuration
+        let api_key = std::env::var("OPENROUTER_API_KEY").unwrap_or_else(|_| {
+            eprintln!("WARNING: OPENROUTER_API_KEY not set. Tests will use empty key.");
+            String::new()
+        });
         ApiClientConfig {
-            base_url: "http://localhost:11434/v1".to_string(),
-            api_key: String::new(),
-            model: "gemma4:e4b".to_string(),
+            base_url: "https://openrouter.ai/api/v1/chat/completions".to_string(),
+            api_key,
+            model: "xiaomi/mimo-v2.5".to_string(),
             temperature: 0.0,
             max_tokens: 4096,
             stream_options: None,

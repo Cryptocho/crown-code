@@ -1,4 +1,4 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent, MouseEventKind};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum KeyAction {
@@ -54,6 +54,14 @@ pub fn map_chat_key(key: KeyEvent) -> KeyAction {
 
         (KeyModifiers::NONE, KeyCode::Tab) => KeyAction::FocusNext,
 
+        _ => KeyAction::None,
+    }
+}
+
+pub fn map_mouse_event(mouse: MouseEvent) -> KeyAction {
+    match mouse.kind {
+        MouseEventKind::ScrollUp => KeyAction::ScrollUp(3),
+        MouseEventKind::ScrollDown => KeyAction::ScrollDown(3),
         _ => KeyAction::None,
     }
 }
@@ -226,5 +234,38 @@ mod tests {
                 "global key mismatch: {k:?}"
             );
         }
+    }
+
+    fn mouse_event(kind: MouseEventKind) -> MouseEvent {
+        MouseEvent {
+            kind,
+            column: 0,
+            row: 0,
+            modifiers: KeyModifiers::NONE,
+        }
+    }
+
+    #[test]
+    fn test_mouse_scroll_up() {
+        assert_eq!(
+            map_mouse_event(mouse_event(MouseEventKind::ScrollUp)),
+            KeyAction::ScrollUp(3)
+        );
+    }
+
+    #[test]
+    fn test_mouse_scroll_down() {
+        assert_eq!(
+            map_mouse_event(mouse_event(MouseEventKind::ScrollDown)),
+            KeyAction::ScrollDown(3)
+        );
+    }
+
+    #[test]
+    fn test_mouse_click_returns_none() {
+        assert_eq!(
+            map_mouse_event(mouse_event(MouseEventKind::Down(crossterm::event::MouseButton::Left))),
+            KeyAction::None
+        );
     }
 }

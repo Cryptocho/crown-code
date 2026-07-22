@@ -25,7 +25,7 @@ pub fn build_system_prompt(cwd: &str) -> String {
     );
     prompt
         .push_str("After each tool use, you will receive the result. Continue using tools until ");
-    prompt.push_str("the task is complete, then use the attempt_completion tool.\n\n");
+    prompt.push_str("the task is complete.\n\n");
 
     prompt.push_str("AVAILABLE TOOLS\n");
     prompt.push_str("- read_file(path, start_line?, end_line?): Read the contents of a file at the specified path.\n");
@@ -36,7 +36,7 @@ pub fn build_system_prompt(cwd: &str) -> String {
     prompt.push_str("- execute_command(command): Execute a shell command on the system.\n");
     prompt.push_str("- search_files(directory, regex, file_pattern?): Search for regex pattern matches in files.\n");
     prompt.push_str("- list_files(path): List files and directories at the specified path.\n");
-    prompt.push_str("- attempt_completion(result): Signal that the task is complete.\n\n");
+    prompt.push('\n');
 
     prompt.push_str("RULES\n");
     prompt.push_str("- Always use tools to accomplish tasks; do not fabricate results.\n");
@@ -94,7 +94,6 @@ mod tests {
     fn test_contains_tool_use_section() {
         let prompt = build_system_prompt("/test");
         assert!(prompt.contains("TOOL USE"));
-        assert!(prompt.contains("attempt_completion"));
     }
 
     #[test]

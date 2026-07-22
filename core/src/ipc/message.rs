@@ -121,7 +121,6 @@ pub const METHOD_ASSISTANT_REASONING: &str = "assistant_reasoning";
 pub const METHOD_TOOL_CALL_START: &str = "tool_call_start";
 pub const METHOD_TOOL_RESULT: &str = "tool_result";
 pub const METHOD_USAGE: &str = "usage";
-pub const METHOD_TASK_DONE: &str = "task_done";
 pub const METHOD_ERROR: &str = "error";
 pub const METHOD_SESSION_CREATED: &str = "session_created";
 pub const METHOD_SESSION_DESTROYED: &str = "session_destroyed";

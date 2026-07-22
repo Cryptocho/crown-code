@@ -1,5 +1,7 @@
 use std::fmt::Debug;
 
+use unicode_width::UnicodeWidthChar;
+
 use ratatui::{
     style::{Color, Style},
     text::{Line, Span},
@@ -34,7 +36,15 @@ impl HistoryCell for UserMessageCell {
     }
 
     fn desired_height(&self, width: u16) -> u16 {
-        let total_len = 6 + self.content.chars().count();
+        let total_len: usize = "[You] "
+            .chars()
+            .map(|c| c.width().unwrap_or(0))
+            .sum::<usize>()
+            + self
+                .content
+                .chars()
+                .map(|c| c.width().unwrap_or(0))
+                .sum::<usize>();
         (total_len as u16).div_ceil(width.max(1)).max(1)
     }
 }
@@ -69,7 +79,16 @@ impl HistoryCell for AssistantMessageCell {
     }
 
     fn desired_height(&self, width: u16) -> u16 {
-        let total_len = 11 + self.content.len() + if self.is_streaming { 1 } else { 0 };
+        let total_len: usize = "[Assistant] "
+            .chars()
+            .map(|c| c.width().unwrap_or(0))
+            .sum::<usize>()
+            + self
+                .content
+                .chars()
+                .map(|c| c.width().unwrap_or(0))
+                .sum::<usize>()
+            + if self.is_streaming { 1 } else { 0 };
         (total_len as u16).div_ceil(width.max(1)).max(1)
     }
 
@@ -127,7 +146,15 @@ impl HistoryCell for ToolCallCell {
         let tag = format!("[{status_icon} {elapsed_str}]");
 
         let mut title = header.clone();
-        let title_display_len = header.chars().count() + tag.chars().count() + 1;
+        // Account for the "  " prefix (2 chars) in width calculation
+        let prefix_width = 2;
+        let title_display_len: usize = prefix_width
+            + header
+                .chars()
+                .map(|c| c.width().unwrap_or(0))
+                .sum::<usize>()
+            + tag.chars().map(|c| c.width().unwrap_or(0)).sum::<usize>()
+            + 1;
         if title_display_len < w {
             let padding = w - title_display_len;
             title.push_str(&" ".repeat(padding));
@@ -136,17 +163,15 @@ impl HistoryCell for ToolCallCell {
         }
         title.push_str(&tag);
 
-        let mut lines = vec![Line::from(vec![Span::styled(
-            format!("  {title}"),
-            Style::default().fg(status_color),
-        )])];
+        let title_line = format!("  {title}");
+        let mut lines = wrap_text_to_lines(&title_line, width, status_color);
 
         if self.expanded
             && let Some(ref output) = self.output
         {
             for (i, line) in output.lines().enumerate() {
-                let numbered = format!("    {} | {}", i + 1, line);
-                lines.push(make_line(&numbered, width, Color::Gray));
+                let numbered = format!("{} | {}", i + 1, line);
+                lines.extend(wrap_text_to_lines(&numbered, width, Color::Gray));
             }
         }
 
@@ -186,7 +211,8 @@ impl HistoryCell for SystemMessageCell {
     }
 
     fn desired_height(&self, width: u16) -> u16 {
-        (self.content.len() as u16).div_ceil(width.max(1)).max(1)
+        let display_len: usize = self.content.chars().map(|c| c.width().unwrap_or(0)).sum();
+        (display_len as u16).div_ceil(width.max(1)).max(1)
     }
 }
 
@@ -203,9 +229,79 @@ impl HistoryCell for ErrorCell {
     }
 
     fn desired_height(&self, width: u16) -> u16 {
-        let text_len = 10 + self.message.len();
+        let text_len: usize = format!("[Error {}] ", self.code)
+            .chars()
+            .map(|c| c.width().unwrap_or(0))
+            .sum::<usize>()
+            + self
+                .message
+                .chars()
+                .map(|c| c.width().unwrap_or(0))
+                .sum::<usize>();
         (text_len as u16).div_ceil(width.max(1)).max(1)
     }
+}
+
+#[derive(Debug)]
+pub struct AgentMarkdownCell {
+    pub markdown_source: String,
+    pub is_streaming: bool,
+}
+
+impl AgentMarkdownCell {
+    pub fn new_streaming() -> Self {
+        Self {
+            markdown_source: String::new(),
+            is_streaming: true,
+        }
+    }
+
+    pub fn finish(&mut self) {
+        self.is_streaming = false;
+    }
+}
+
+impl HistoryCell for AgentMarkdownCell {
+    fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
+        let prefix = "[Assistant] ";
+        let mut lines = vec![Line::from(Span::styled(
+            prefix.to_string(),
+            Style::default().fg(Color::Green),
+        ))];
+        let mut source = self.markdown_source.clone();
+        if self.is_streaming {
+            source.push('\u{258C}');
+        }
+        let mut content_lines =
+            render_markdown(&source, width.saturating_sub(prefix_width(prefix)));
+        lines.append(&mut content_lines);
+        lines
+    }
+
+    fn desired_height(&self, width: u16) -> u16 {
+        self.display_lines(width).len() as u16
+    }
+
+    fn is_stream_continuation(&self) -> bool {
+        self.is_streaming
+    }
+
+    fn append_delta(&mut self, delta: &str) {
+        self.markdown_source.push_str(delta);
+    }
+
+    fn finish_streaming(&mut self) {
+        self.is_streaming = false;
+    }
+}
+
+use crate::markdown_render::render_markdown;
+
+fn prefix_width(prefix: &str) -> u16 {
+    prefix
+        .chars()
+        .map(|c| c.width().unwrap_or(0))
+        .sum::<usize>() as u16
 }
 
 fn wrap_text_to_lines(text: &str, width: u16, color: Color) -> Vec<Line<'static>> {
@@ -222,11 +318,18 @@ fn wrap_text_to_lines(text: &str, width: u16, color: Color) -> Vec<Line<'static>
         }
         let mut remaining = line;
         while !remaining.is_empty() {
-            let byte_end = remaining
-                .char_indices()
-                .nth(width)
-                .map(|(i, _)| i)
-                .unwrap_or(remaining.len());
+            // Find the split point using display width (not char count)
+            let mut display_width = 0usize;
+            let mut byte_end = remaining.len();
+            for (i, ch) in remaining.char_indices() {
+                let w = ch.width().unwrap_or(0);
+                if display_width + w > width {
+                    byte_end = i;
+                    break;
+                }
+                display_width += w;
+            }
+            // Try to break at a space for cleaner output
             let split_at = if remaining.len() > byte_end {
                 remaining[..byte_end]
                     .rfind(' ')
@@ -234,6 +337,12 @@ fn wrap_text_to_lines(text: &str, width: u16, color: Color) -> Vec<Line<'static>
                     .unwrap_or(byte_end)
             } else {
                 byte_end
+            };
+            // Avoid splitting at zero width (happens with wide char at boundary)
+            let split_at = if split_at == 0 {
+                byte_end.max(1)
+            } else {
+                split_at
             };
             let (chunk, rest) = remaining.split_at(split_at);
             lines.push(Line::from(Span::styled(
@@ -249,6 +358,8 @@ fn wrap_text_to_lines(text: &str, width: u16, color: Color) -> Vec<Line<'static>
     lines
 }
 
+// Kept for backward compatibility; prefer wrap_text_to_lines for new code.
+#[allow(dead_code)]
 fn make_line(text: &str, width: u16, color: Color) -> Line<'static> {
     let truncated: String = text.chars().take(width as usize).collect();
     Line::from(Span::styled(truncated, Style::default().fg(color)))
@@ -443,5 +554,95 @@ mod tests {
         let text = "word ".repeat(20);
         let lines = wrap_text_to_lines(&text, 40, Color::White);
         assert!(lines.len() >= 3);
+    }
+
+    #[test]
+    fn test_agent_markdown_cell_basic() {
+        let cell = AgentMarkdownCell {
+            markdown_source: "# Hello".to_string(),
+            is_streaming: false,
+        };
+        let lines = cell.display_lines(80);
+        assert!(!lines.is_empty());
+        let all_text: String = lines
+            .iter()
+            .flat_map(|l| l.spans.iter())
+            .map(|s| s.content.as_ref())
+            .collect::<Vec<_>>()
+            .join("");
+        assert!(all_text.contains("Hello"));
+    }
+
+    #[test]
+    fn test_agent_markdown_cell_streaming_lifecycle() {
+        let mut cell = AgentMarkdownCell::new_streaming();
+        assert!(cell.is_stream_continuation());
+
+        cell.append_delta("hello ");
+        cell.append_delta("world");
+        assert!(cell.is_stream_continuation());
+
+        let lines = cell.display_lines(80);
+        assert!(!lines.is_empty());
+        let all_text: String = lines
+            .iter()
+            .flat_map(|l| l.spans.iter())
+            .map(|s| s.content.as_ref())
+            .collect::<Vec<_>>()
+            .join("");
+        assert!(all_text.contains("hello world"));
+        assert!(all_text.contains('\u{258C}'));
+
+        cell.finish_streaming();
+        assert!(!cell.is_stream_continuation());
+
+        let lines = cell.display_lines(80);
+        let all_text: String = lines
+            .iter()
+            .flat_map(|l| l.spans.iter())
+            .map(|s| s.content.as_ref())
+            .collect::<Vec<_>>()
+            .join("");
+        assert!(!all_text.contains('\u{258C}'));
+    }
+
+    #[test]
+    fn test_agent_markdown_cell_resize_rerender() {
+        let cell = AgentMarkdownCell {
+            markdown_source: "This is a long line that should wrap at different widths".to_string(),
+            is_streaming: false,
+        };
+        let lines_w80 = cell.display_lines(80);
+        let lines_w40 = cell.display_lines(40);
+        assert!(lines_w40.len() >= lines_w80.len());
+    }
+
+    #[test]
+    fn test_agent_markdown_cell_desired_height_matches_display() {
+        let cell = AgentMarkdownCell {
+            markdown_source: "# Title\n\nSome content here".to_string(),
+            is_streaming: false,
+        };
+        let display_lines = cell.display_lines(80);
+        let desired = cell.desired_height(80);
+        assert_eq!(display_lines.len() as u16, desired);
+    }
+
+    #[test]
+    fn test_agent_markdown_cell_with_markdown() {
+        let cell = AgentMarkdownCell {
+            markdown_source: "**bold** and *italic*".to_string(),
+            is_streaming: false,
+        };
+        let lines = cell.display_lines(80);
+        assert!(!lines.is_empty());
+        let all_text: String = lines
+            .iter()
+            .flat_map(|l| l.spans.iter())
+            .map(|s| s.content.as_ref())
+            .collect::<Vec<_>>()
+            .join("");
+        assert!(all_text.contains("bold"));
+        assert!(all_text.contains("italic"));
     }
 }

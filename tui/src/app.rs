@@ -167,6 +167,21 @@ impl App {
         }
     }
 
+    pub fn handle_mouse(&mut self, mouse: crossterm::event::MouseEvent) {
+        let action = keymap::map_mouse_event(mouse);
+        match action {
+            KeyAction::ScrollUp(n) => {
+                self.chat_widget.scroll_up(n);
+                self.needs_redraw = true;
+            }
+            KeyAction::ScrollDown(n) => {
+                self.chat_widget.scroll_down(n);
+                self.needs_redraw = true;
+            }
+            _ => {}
+        }
+    }
+
     pub fn handle_paste(&mut self, text: &str) {
         if self.focus == FocusTarget::Input {
             for ch in text.chars() {
@@ -350,11 +365,10 @@ impl App {
             }
             AppEvent::ReconnectFailed { reason } => {
                 use crate::history_cell::ErrorCell;
-                self.chat_widget
-                    .push_cell(Box::new(ErrorCell {
-                        code: 0,
-                        message: format!("Reconnect failed: {reason}"),
-                    }));
+                self.chat_widget.push_cell(Box::new(ErrorCell {
+                    code: 0,
+                    message: format!("Reconnect failed: {reason}"),
+                }));
                 self.needs_redraw = true;
             }
         }
@@ -943,8 +957,7 @@ mod tests {
         use crate::history_cell::ToolCallStatus;
         let (tx, _rx) = mpsc::unbounded_channel();
         let mut app = App::new("test".into(), AppEventSender::new(tx));
-        app.chat_widget
-            .start_tool_call("c1", "read_file", "{}");
+        app.chat_widget.start_tool_call("c1", "read_file", "{}");
         app.handle_app_event(AppEvent::IpcDisconnected);
         let tc = app.chat_widget.cells[0].as_tool_call().unwrap();
         assert_eq!(tc.status, ToolCallStatus::Error);
@@ -975,15 +988,11 @@ mod tests {
             reason: "connection refused".into(),
         });
         assert!(app.is_disconnected());
-        assert!(app
-            .chat_widget
-            .cells
-            .iter()
-            .any(|c| {
-                let lines = c.display_lines(80);
-                let text = format!("{lines:?}");
-                text.contains("Reconnect failed") && text.contains("connection refused")
-            }));
+        assert!(app.chat_widget.cells.iter().any(|c| {
+            let lines = c.display_lines(80);
+            let text = format!("{lines:?}");
+            text.contains("Reconnect failed") && text.contains("connection refused")
+        }));
     }
 
     #[test]

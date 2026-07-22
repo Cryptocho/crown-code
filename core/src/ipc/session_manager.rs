@@ -9,7 +9,7 @@ use crate::agent::r#loop::{AgentEventHandler, AgentSession};
 use crate::api::types::ApiClientConfig;
 use crate::ipc::message::{
     JsonRpcMessage, METHOD_ASSISTANT_REASONING, METHOD_ASSISTANT_TEXT, METHOD_ERROR,
-    METHOD_TASK_DONE, METHOD_TOOL_CALL_START, METHOD_TOOL_RESULT, METHOD_USAGE, make_notification,
+    METHOD_TOOL_CALL_START, METHOD_TOOL_RESULT, METHOD_USAGE, make_notification,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -89,13 +89,6 @@ impl AgentEventHandler for IpcEventHandler {
                 "output_tokens": output_tokens,
                 "cache_read_tokens": cache_read_tokens,
             }),
-        ));
-    }
-
-    fn on_task_done(&mut self, summary: &str) {
-        let _ = self.event_tx.try_send(make_notification(
-            METHOD_TASK_DONE,
-            serde_json::json!({"session_id": self.session_id, "summary": summary}),
         ));
     }
 
@@ -219,10 +212,25 @@ mod tests {
     use crate::api::types::ApiClientConfig;
 
     fn make_config() -> ApiClientConfig {
+        // // Local Ollama configuration
+        // ApiClientConfig {
+        //     base_url: "http://localhost:11434/v1".to_string(),
+        //     api_key: String::new(),
+        //     model: "gemma4:e4b".to_string(),
+        //     temperature: 0.0,
+        //     max_tokens: 4096,
+        //     stream_options: None,
+        // }
+
+        // OpenRouter configuration
+        let api_key = std::env::var("OPENROUTER_API_KEY").unwrap_or_else(|_| {
+            eprintln!("WARNING: OPENROUTER_API_KEY not set. Tests will use empty key.");
+            String::new()
+        });
         ApiClientConfig {
-            base_url: "http://localhost:11434/v1".to_string(),
-            api_key: String::new(),
-            model: "gemma4:e4b".to_string(),
+            base_url: "https://openrouter.ai/api/v1/chat/completions".to_string(),
+            api_key,
+            model: "xiaomi/mimo-v2.5".to_string(),
             temperature: 0.0,
             max_tokens: 4096,
             stream_options: None,
@@ -284,7 +292,10 @@ mod tests {
         cfg.model = "new-model".to_string();
         sm.update_config(cfg).await;
         assert_eq!(sm.get_config().await.model, "new-model");
-        assert_eq!(sm.get_config().await.base_url, "http://localhost:11434/v1");
+        assert_eq!(
+            sm.get_config().await.base_url,
+            "https://openrouter.ai/api/v1/chat/completions"
+        );
     }
 
     #[tokio::test]
@@ -385,18 +396,6 @@ mod tests {
         assert_eq!(params["input_tokens"], 100);
         assert_eq!(params["output_tokens"], 50);
         assert_eq!(params["cache_read_tokens"], 30);
-    }
-
-    #[tokio::test]
-    async fn test_ipc_event_handler_on_task_done() {
-        let (tx, mut rx) = mpsc::channel(256);
-        let mut handler = IpcEventHandler::new("sess_test".to_string(), tx);
-        handler.on_task_done("done");
-        let msg = rx.recv().await.unwrap();
-        assert_eq!(msg.method.as_deref(), Some(METHOD_TASK_DONE));
-        let params = msg.params.unwrap();
-        assert_eq!(params["session_id"], "sess_test");
-        assert_eq!(params["summary"], "done");
     }
 
     #[tokio::test]

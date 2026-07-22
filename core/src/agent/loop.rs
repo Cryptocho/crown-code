@@ -12,7 +12,6 @@ pub trait AgentEventHandler: Send {
     fn on_tool_call_start(&mut self, call_id: &str, name: &str, arguments: &str);
     fn on_tool_result(&mut self, call_id: &str, name: &str, content: &str, is_error: bool);
     fn on_usage(&mut self, input_tokens: i32, output_tokens: i32, cache_read_tokens: i32);
-    fn on_task_done(&mut self, summary: &str);
     fn on_error(&mut self, code: i32, message: &str);
 }
 
@@ -119,11 +118,11 @@ impl AgentSession {
                 break;
             }
 
-            let mut has_completion = false;
+            let mut cancelled = false;
             for tc in &tool_calls {
                 if self.cancelled.load(Ordering::SeqCst) {
                     handler.on_error(0, "task cancelled");
-                    has_completion = true;
+                    cancelled = true;
                     break;
                 }
 
@@ -153,12 +152,6 @@ impl AgentSession {
 
                 handler.on_tool_result(&tc.id, &tc.function_name, &result, is_error);
 
-                if tc.function_name == "attempt_completion" {
-                    let summary = result.strip_prefix("[COMPLETION]").unwrap_or(&result);
-                    handler.on_task_done(summary);
-                    has_completion = true;
-                }
-
                 self.history.push(Message {
                     role: MessageRole::Tool,
                     content: result,
@@ -168,7 +161,7 @@ impl AgentSession {
                 });
             }
 
-            if has_completion {
+            if cancelled {
                 break;
             }
         }
@@ -205,7 +198,6 @@ mod tests {
         tool_calls: Vec<(String, String, String)>,
         tool_results: Vec<(String, String, bool)>,
         errors: Vec<(i32, String)>,
-        summaries: Vec<String>,
     }
 
     impl TestHandler {
@@ -215,7 +207,6 @@ mod tests {
                 tool_calls: Vec::new(),
                 tool_results: Vec::new(),
                 errors: Vec::new(),
-                summaries: Vec::new(),
             }
         }
     }
@@ -234,9 +225,6 @@ mod tests {
                 .push((call_id.to_string(), content.to_string(), is_error));
         }
         fn on_usage(&mut self, _input: i32, _output: i32, _cache_read: i32) {}
-        fn on_task_done(&mut self, summary: &str) {
-            self.summaries.push(summary.to_string());
-        }
         fn on_error(&mut self, code: i32, message: &str) {
             self.errors.push((code, message.to_string()));
         }
@@ -326,6 +314,6 @@ mod tests {
     #[test]
     fn test_agent_session_new_tools_non_empty() {
         let tools = get_tool_definitions();
-        assert_eq!(tools.len(), 7);
+        assert_eq!(tools.len(), 6);
     }
 }

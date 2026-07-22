@@ -5,14 +5,14 @@
 A vibe coding TUI tool. Core (daemon-style process) communicates with frontends (TUI, future GUI) via IPC (JSON-RPC over stdio/Unix socket).
 
 Compared to cline, this project aims to deliver:
-- **Finer-grained rollback**: checkpoint after every file edit, not just at request boundaries
-- **Detailed error info**: structured JSON error responses with context, not plain strings
+- **Finer-grained rollback**: checkpoint(using shadow git) after every file edit, not just at request boundaries
+- **Detailed error info**: send error message to frontend and auto-retry for some errors
 - **Multi-session**: single core process handles multiple frontend sessions simultaneously
-- **Better TUI**: built with ratatui, full terminal UI with split panes, live streaming
+- **Better TUI**: built with ratatui, full terminal UI with split panes, live streaming, with status of cost/latency/throughtout... lightweight and high performance
 - **Workspace vector index**: build and query a vector index over the entire workspace for semantic search
 - **Accurate session cost stats**: include subagent calls in total cost tracking, not just top-level LLM requests
-- **Regenerate when stop**: regenerate llm response when error or user interrupt
-- 根据智能体提供的聚焦问题，对读取、搜索和 shell 工具的大型输出进行任务感知裁剪
+- **Regenerate when stop**: button for users to regenerate llm response
+- **SWE-Pruner**: self-adaptive context pruning framework designed for LLM coding agents
 
 ## Project Structure
 
@@ -79,13 +79,7 @@ Compared to cline, this project aims to deliver:
 │           ├── chat.rs          # Chat panel (buf.set_line + scroll)
 │           ├── input.rs         # Input bar (prefix + textarea + reversed cursor)
 │           ├── tools.rs         # Tool call rendering helper
-│           └── streaming.rs     # StreamingRenderer (P2 two-region model interface)
-├── cline/                       # Upstream Cline extension reference (archived)
-│   ├── package.json
-│   ├── src/
-│   ├── docs/
-│   └── ...
-├── CLINE.md                     # Documentation about the upstream Cline extension
+│           └── streaming.rs     # StreamingRenderer (P2 two-region model interface)upstream Cline extension
 ├── flake.nix                    # Nix flake — build system + dev env (crane)
 ├── flake.lock                   # Dependency lock
 ├── rust-toolchain.toml          # Rust toolchain version/components

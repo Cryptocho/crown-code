@@ -55,6 +55,7 @@ impl HttpTransport {
             .post(&self.base_url)
             .bearer_auth(&self.bearer_token)
             .header("Accept", "application/json, text/event-stream")
+            .header("Content-Type", "application/json")
             .body(json_body.to_string())
             .send()
             .await
@@ -146,6 +147,7 @@ impl HttpTransport {
             .post(&self.base_url)
             .bearer_auth(&self.bearer_token)
             .header("Accept", "text/event-stream")
+            .header("Content-Type", "application/json")
             .body(json_body.to_string())
             .send()
             .await
@@ -166,9 +168,52 @@ impl HttpTransport {
             .to_lowercase();
 
         if !content_type.starts_with("text/event-stream") {
+            // Read the body to extract the actual error message from the API.
+            // Most OpenAI-compatible APIs return errors as application/json
+            // even when streaming was requested.
+            let body = match response.text().await {
+                Ok(b) => b,
+                Err(e) => {
+                    return (
+                        status_code,
+                        format!(
+                            "expected text/event-stream but got: {} (body read error: {})",
+                            content_type, e
+                        ),
+                    );
+                }
+            };
+            // Try to extract a meaningful error message from the JSON body
+            let detail = if let Ok(root) = serde_json::from_str::<serde_json::Value>(&body) {
+                if let Some(err) = root.get("error") {
+                    if let Some(msg) = err.get("message").and_then(|m| m.as_str()) {
+                        msg.to_string()
+                    } else {
+                        err.to_string()
+                    }
+                } else {
+                    // Non-error JSON (e.g. full non-streaming response) — truncate for readability
+                    if body.len() > 500 {
+                        let truncated: String = body.chars().take(500).collect();
+                        format!("{}...(truncated, {} bytes total)", truncated, body.len())
+                    } else {
+                        body.clone()
+                    }
+                }
+            } else {
+                if body.len() > 500 {
+                    let truncated: String = body.chars().take(500).collect();
+                    format!("{}...(truncated, {} bytes total)", truncated, body.len())
+                } else {
+                    body.clone()
+                }
+            };
             return (
-                0,
-                format!("expected text/event-stream but got: {}", content_type),
+                status_code,
+                format!(
+                    "expected text/event-stream but got: {} — {}",
+                    content_type, detail
+                ),
             );
         }
 
@@ -282,5 +327,325 @@ mod tests {
     fn test_http_transport_url_with_path() {
         let t = HttpTransport::new("http://host:8080/mcp/v1", "");
         assert_eq!(t.base_url, "http://host:8080/mcp/v1");
+    }
+
+    // ── wiremock-based integration tests ──────────────────────────────
+    mod mock_tests {
+        use super::*;
+        use wiremock::matchers::{header, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        // -- Content-Type header tests ------------------------------------
+
+        #[tokio::test]
+        async fn test_post_json_sends_content_type_json() {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .and(path("/test"))
+                .and(header("Content-Type", "application/json"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "result": "ok"
+                })))
+                .expect(1)
+                .mount(&server)
+                .await;
+
+            let url = format!("{}/test", server.uri());
+            let mut t = HttpTransport::new(&url, "token");
+            let resp = t.post_json(r#"{"key":"value"}"#).await;
+            assert_eq!(resp.status_code, 200);
+            assert!(resp.error.is_empty());
+        }
+
+        #[tokio::test]
+        async fn test_post_json_stream_sends_content_type_json() {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .and(path("/stream"))
+                .and(header("Content-Type", "application/json"))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_raw("data: [DONE]\n\n", "text/event-stream"),
+                )
+                .expect(1)
+                .mount(&server)
+                .await;
+
+            let url = format!("{}/stream", server.uri());
+            let mut t = HttpTransport::new(&url, "token");
+            let mut events = Vec::new();
+            let (status, err) = t
+                .post_json_stream(r#"{"stream":true}"#, |evt| {
+                    events.push(evt);
+                    true
+                })
+                .await;
+            assert_eq!(status, 200);
+            assert!(err.is_empty(), "should succeed, got: {}", err);
+        }
+
+        #[tokio::test]
+        async fn test_post_json_sends_bearer_token() {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .and(header("Authorization", "Bearer my-secret"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "ok": true
+                })))
+                .expect(1)
+                .mount(&server)
+                .await;
+
+            let mut t = HttpTransport::new(&server.uri(), "my-secret");
+            let resp = t.post_json("{}").await;
+            assert_eq!(resp.status_code, 200);
+        }
+
+        // -- post_json_stream JSON error body tests -----------------------
+
+        #[tokio::test]
+        async fn test_post_json_stream_json_error_extracts_error_message() {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .respond_with(
+                    ResponseTemplate::new(401)
+                        .insert_header("content-type", "application/json")
+                        .set_body_json(serde_json::json!({
+                            "error": {
+                                "message": "Invalid API key provided: sk-***",
+                                "type": "invalid_request_error",
+                                "code": "invalid_api_key"
+                            }
+                        })),
+                )
+                .mount(&server)
+                .await;
+
+            let mut t = HttpTransport::new(&server.uri(), "bad-key");
+            let (status, err) = t.post_json_stream("{}", |_| true).await;
+            assert_eq!(status, 401);
+            assert!(
+                err.contains("Invalid API key provided"),
+                "should extract error.message, got: {}",
+                err
+            );
+            assert!(
+                err.contains("application/json"),
+                "should mention content-type, got: {}",
+                err
+            );
+        }
+
+        #[tokio::test]
+        async fn test_post_json_stream_json_error_returns_real_status_code() {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .respond_with(
+                    ResponseTemplate::new(429)
+                        .insert_header("content-type", "application/json")
+                        .set_body_json(serde_json::json!({
+                            "error": {
+                                "message": "Rate limit exceeded",
+                                "type": "rate_limit_error"
+                            }
+                        })),
+                )
+                .mount(&server)
+                .await;
+
+            let mut t = HttpTransport::new(&server.uri(), "token");
+            let (status, err) = t.post_json_stream("{}", |_| true).await;
+            assert_eq!(status, 429, "should return real HTTP status, not 0");
+            assert!(err.contains("Rate limit exceeded"));
+        }
+
+        #[tokio::test]
+        async fn test_post_json_stream_json_error_without_message_field() {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .respond_with(
+                    ResponseTemplate::new(400)
+                        .insert_header("content-type", "application/json")
+                        .set_body_json(serde_json::json!({
+                            "error": "bad request"
+                        })),
+                )
+                .mount(&server)
+                .await;
+
+            let mut t = HttpTransport::new(&server.uri(), "token");
+            let (status, err) = t.post_json_stream("{}", |_| true).await;
+            assert_eq!(status, 400);
+            // error is not a message string, so it falls back to err.to_string()
+            assert!(
+                err.contains("bad request"),
+                "should include the error value, got: {}",
+                err
+            );
+        }
+
+        #[tokio::test]
+        async fn test_post_json_stream_json_body_without_error_field() {
+            let server = MockServer::start().await;
+            let body = serde_json::json!({
+                "id": "chatcmpl-123",
+                "choices": [{"message": {"content": "hello"}}]
+            });
+            Mock::given(method("POST"))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .insert_header("content-type", "application/json")
+                        .set_body_json(&body),
+                )
+                .mount(&server)
+                .await;
+
+            let mut t = HttpTransport::new(&server.uri(), "token");
+            let (status, err) = t.post_json_stream("{}", |_| true).await;
+            assert_eq!(status, 200);
+            // Non-error JSON but not SSE — should include the body as detail
+            assert!(
+                err.contains("chatcmpl-123"),
+                "should include raw body, got: {}",
+                err
+            );
+        }
+
+        #[tokio::test]
+        async fn test_post_json_stream_large_json_body_truncated() {
+            let server = MockServer::start().await;
+            // Build a body > 500 chars with no "error" field
+            let large_value = "x".repeat(1000);
+            let body = serde_json::json!({
+                "data": large_value
+            });
+            let body_str = body.to_string();
+            Mock::given(method("POST"))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_string(&body_str)
+                        .insert_header("content-type", "application/json"),
+                )
+                .mount(&server)
+                .await;
+
+            let mut t = HttpTransport::new(&server.uri(), "token");
+            let (status, err) = t.post_json_stream("{}", |_| true).await;
+            assert_eq!(status, 200);
+            assert!(
+                err.contains("truncated"),
+                "should indicate truncation, got: {}",
+                err
+            );
+            let expected_size = body_str.len();
+            assert!(
+                err.contains(&format!("{} bytes total", expected_size)),
+                "should show actual body size ({}), got: {}",
+                expected_size,
+                err
+            );
+        }
+
+        #[tokio::test]
+        async fn test_post_json_stream_non_json_error_body() {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .respond_with(
+                    ResponseTemplate::new(502)
+                        .insert_header("content-type", "text/plain")
+                        .set_body_string("Bad Gateway"),
+                )
+                .mount(&server)
+                .await;
+
+            let mut t = HttpTransport::new(&server.uri(), "token");
+            let (status, err) = t.post_json_stream("{}", |_| true).await;
+            assert_eq!(status, 502);
+            assert!(
+                err.contains("Bad Gateway"),
+                "should include raw body for non-JSON, got: {}",
+                err
+            );
+        }
+
+        #[tokio::test]
+        async fn test_post_json_stream_sse_success() {
+            let server = MockServer::start().await;
+            let sse_body =
+                "data: {\"choices\":[{\"delta\":{\"content\":\"Hi\"}}]}\n\ndata: [DONE]\n\n";
+            Mock::given(method("POST"))
+                .respond_with(
+                    ResponseTemplate::new(200).set_body_raw(sse_body, "text/event-stream"),
+                )
+                .mount(&server)
+                .await;
+
+            let mut t = HttpTransport::new(&server.uri(), "token");
+            let mut event_count = 0;
+            let (status, err) = t
+                .post_json_stream("{}", |_evt| {
+                    event_count += 1;
+                    true
+                })
+                .await;
+            assert_eq!(status, 200);
+            assert!(err.is_empty());
+            assert!(
+                event_count >= 2,
+                "should get at least 2 events (data + DONE), got: {}",
+                event_count
+            );
+        }
+
+        // -- post_json JSON error body tests -----------------------------
+
+        #[tokio::test]
+        async fn test_post_json_returns_body_on_non_200() {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .respond_with(
+                    ResponseTemplate::new(400)
+                        .insert_header("content-type", "application/json")
+                        .set_body_json(serde_json::json!({
+                            "error": {
+                                "message": "Invalid model: gpt-99",
+                                "type": "invalid_request_error"
+                            }
+                        })),
+                )
+                .mount(&server)
+                .await;
+
+            let mut t = HttpTransport::new(&server.uri(), "token");
+            let resp = t.post_json("{}").await;
+            assert_eq!(resp.status_code, 400);
+            assert!(
+                resp.body.contains("Invalid model"),
+                "post_json should include error body, got: {}",
+                resp.body
+            );
+        }
+
+        #[tokio::test]
+        async fn test_post_json_sse_response_parsed() {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .respond_with(ResponseTemplate::new(200).set_body_raw(
+                    "data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\n\ndata: [DONE]\n\n",
+                    "text/event-stream",
+                ))
+                .mount(&server)
+                .await;
+
+            let mut t = HttpTransport::new(&server.uri(), "token");
+            let resp = t.post_json("{}").await;
+            assert_eq!(resp.status_code, 200);
+            assert!(resp.error.is_empty());
+            assert!(
+                resp.events.len() >= 2,
+                "should parse SSE events, got: {}",
+                resp.events.len()
+            );
+        }
     }
 }

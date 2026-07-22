@@ -13,10 +13,25 @@ async fn main() {
             .map(|s| s.as_str()),
     );
 
+    // // Local Ollama configuration
+    // let config = ApiClientConfig {
+    //     base_url: "http://localhost:11434/v1".to_string(),
+    //     api_key: String::new(),
+    //     model: "gemma4:e4b".to_string(),
+    //     temperature: 0.0,
+    //     max_tokens: 4096,
+    //     stream_options: None,
+    // };
+
+    // OpenRouter configuration
+    let api_key = std::env::var("OPENROUTER_API_KEY").unwrap_or_else(|_| {
+        eprintln!("WARNING: OPENROUTER_API_KEY not set. API calls will fail.");
+        String::new()
+    });
     let config = ApiClientConfig {
-        base_url: "http://localhost:11434/v1".to_string(),
-        api_key: String::new(),
-        model: "gemma4:e4b".to_string(),
+        base_url: "https://openrouter.ai/api/v1/chat/completions".to_string(),
+        api_key,
+        model: "xiaomi/mimo-v2.5".to_string(),
         temperature: 0.0,
         max_tokens: 4096,
         stream_options: None,

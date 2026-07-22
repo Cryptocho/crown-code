@@ -47,8 +47,12 @@ pub enum AppEvent {
 
     IpcDisconnected,
     ReconnectRequested,
-    IpcReconnected { session_id: String },
-    ReconnectFailed { reason: String },
+    IpcReconnected {
+        session_id: String,
+    },
+    ReconnectFailed {
+        reason: String,
+    },
 }
 
 pub struct AppEventSender {

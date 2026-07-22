@@ -441,16 +441,32 @@ mod tests {
 
     #[test]
     fn test_full_config() {
+        // // Local Ollama configuration
+        // let cfg = ApiClientConfig {
+        //     base_url: "http://localhost:11434/v1".to_string(),
+        //     api_key: String::new(),
+        //     model: "llama3".to_string(),
+        //     temperature: 0.7,
+        //     max_tokens: 2048,
+        //     stream_options: Some(serde_json::json!({"include_usage": true})),
+        // };
+        // assert_eq!(cfg.base_url, "http://localhost:11434/v1");
+        // assert_eq!(cfg.model, "llama3");
+
+        // OpenRouter configuration
         let cfg = ApiClientConfig {
-            base_url: "http://localhost:11434/v1".to_string(),
-            api_key: String::new(),
-            model: "llama3".to_string(),
+            base_url: "https://openrouter.ai/api/v1/chat/completions".to_string(),
+            api_key: "sk-test".to_string(),
+            model: "xiaomi/mimo-v2.5".to_string(),
             temperature: 0.7,
             max_tokens: 2048,
             stream_options: Some(serde_json::json!({"include_usage": true})),
         };
-        assert_eq!(cfg.base_url, "http://localhost:11434/v1");
-        assert_eq!(cfg.model, "llama3");
+        assert_eq!(
+            cfg.base_url,
+            "https://openrouter.ai/api/v1/chat/completions"
+        );
+        assert_eq!(cfg.model, "xiaomi/mimo-v2.5");
         assert_eq!(cfg.temperature, 0.7);
         assert_eq!(cfg.max_tokens, 2048);
         assert_eq!(

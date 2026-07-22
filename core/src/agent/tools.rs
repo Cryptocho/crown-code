@@ -77,17 +77,6 @@ pub fn get_tool_definitions() -> Vec<Tool> {
                 "required": ["path"]
             }),
         },
-        Tool {
-            name: "attempt_completion".to_string(),
-            description: "Signal that the task is complete. Provide a result summary for the user.".to_string(),
-            parameters: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "result": {"type": "string", "description": "Summary of what was accomplished"}
-                },
-                "required": ["result"]
-            }),
-        },
     ]
 }
 
@@ -99,7 +88,6 @@ pub async fn execute_tool(name: &str, args: &Value) -> String {
         "execute_command" => execute_execute_command(args).await,
         "search_files" => execute_search_files(args),
         "list_files" => execute_list_files(args),
-        "attempt_completion" => execute_attempt_completion(args),
         _ => format!("Error: Unknown tool: {}", name),
     }
 }
@@ -228,11 +216,6 @@ fn execute_list_files(args: &Value) -> String {
     result
 }
 
-fn execute_attempt_completion(args: &Value) -> String {
-    let result = args.get("result").and_then(|v| v.as_str()).unwrap_or("");
-    format!("[COMPLETION]{}", result)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -240,7 +223,7 @@ mod tests {
     #[test]
     fn test_get_tool_definitions_returns_seven() {
         let tools = get_tool_definitions();
-        assert_eq!(tools.len(), 7);
+        assert_eq!(tools.len(), 6);
     }
 
     #[test]
@@ -253,7 +236,6 @@ mod tests {
         assert!(names.contains(&"execute_command"));
         assert!(names.contains(&"search_files"));
         assert!(names.contains(&"list_files"));
-        assert!(names.contains(&"attempt_completion"));
     }
 
     #[test]
@@ -393,20 +375,6 @@ mod tests {
         assert!(result.contains("Exit code: 1"));
     }
 
-    #[tokio::test]
-    async fn test_attempt_completion_mark() {
-        let args = serde_json::json!({"result": "Task done"});
-        let result = execute_tool("attempt_completion", &args).await;
-        assert_eq!(result, "[COMPLETION]Task done");
-    }
-
-    #[tokio::test]
-    async fn test_attempt_completion_empty_result() {
-        let args = serde_json::json!({"result": ""});
-        let result = execute_tool("attempt_completion", &args).await;
-        assert_eq!(result, "[COMPLETION]");
-    }
-
     #[test]
     fn test_replace_in_file_requires_path_old_string_new_string() {
         let tools = get_tool_definitions();
@@ -440,17 +408,6 @@ mod tests {
         let tool = tools.iter().find(|t| t.name == "list_files").unwrap();
         let required = tool.parameters["required"].as_array().unwrap();
         assert!(required.iter().any(|r| r.as_str() == Some("path")));
-    }
-
-    #[test]
-    fn test_attempt_completion_requires_result() {
-        let tools = get_tool_definitions();
-        let tool = tools
-            .iter()
-            .find(|t| t.name == "attempt_completion")
-            .unwrap();
-        let required = tool.parameters["required"].as_array().unwrap();
-        assert!(required.iter().any(|r| r.as_str() == Some("result")));
     }
 
     #[test]

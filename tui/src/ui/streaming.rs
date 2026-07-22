@@ -1,10 +1,5 @@
-use crate::history_cell::{AssistantMessageCell, HistoryCell};
-use ratatui::{
-    buffer::Buffer,
-    layout::Rect,
-    text::Line,
-    widgets::{Paragraph, Widget, Wrap},
-};
+use crate::markdown_render::render_markdown;
+use ratatui::{buffer::Buffer, layout::Rect, text::Line};
 
 pub struct StreamingRenderer {
     raw_source: String,
@@ -38,11 +33,9 @@ impl StreamingRenderer {
     }
 
     fn rerender(&mut self, width: u16) {
-        let cell = AssistantMessageCell {
-            content: self.raw_source.clone(),
-            is_streaming: true,
-        };
-        self.rendered_lines = cell.display_lines(width);
+        let mut source = self.raw_source.clone();
+        source.push('\u{258C}');
+        self.rendered_lines = render_markdown(&source, width);
         self.last_width = width;
     }
 
@@ -51,8 +44,12 @@ impl StreamingRenderer {
             return;
         }
         let lines = self.rendered_lines(area.width).to_vec();
-        let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
-        paragraph.render(area, buf);
+        for (i, line) in lines.iter().enumerate() {
+            if i as u16 >= area.height {
+                break;
+            }
+            buf.set_line(area.x, area.y + i as u16, line, area.width);
+        }
     }
 
     pub fn reset(&mut self) {

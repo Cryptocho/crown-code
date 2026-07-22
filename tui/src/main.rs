@@ -5,6 +5,7 @@ mod event;
 mod history_cell;
 mod ipc;
 mod keymap;
+mod markdown_render;
 mod renderable;
 mod tui;
 mod ui;
@@ -90,6 +91,9 @@ async fn main() -> anyhow::Result<()> {
                     }
                     TuiEvent::Resize => {
                         app.needs_redraw = true;
+                    }
+                    TuiEvent::Mouse(mouse) => {
+                        app.handle_mouse(mouse);
                     }
                     TuiEvent::Draw => {}
                 }
